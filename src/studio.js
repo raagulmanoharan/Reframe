@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { validateScene } from '../lib/scene-schema.js';
 
-export function createStudio(container, ratio) {
+export function createStudio(container, ratio, onSelection = () => {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
@@ -27,7 +27,82 @@ export function createStudio(container, ratio) {
   Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, far: 100 });
   scene.add(sun);
   const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(5, 3, 5); scene.add(fill);
-  let layout = null;
+  let layout = null, moveMode = false, selected = null, drag = null, undo = [], active = false;
+  let meshes = [];
+  const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+  const highlight = new THREE.BoxHelper(new THREE.Object3D(), 0x9b742e);
+  highlight.visible = false; scene.add(highlight);
+  function selectionChanged() {
+    if (selected !== null) highlight.setFromObject(meshes[selected]);
+    highlight.visible = moveMode && selected !== null;
+    onSelection(selected === null ? null : { index: selected, name: layout.objects[selected].name, height: meshes[selected].position.y }, undo.length > 0);
+  }
+  function selectObject(index) {
+    selected = Number.isInteger(index) && meshes[index] ? index : null;
+    selectionChanged();
+  }
+  function rememberMove() {
+    if (selected !== null) {
+      undo.push({ index: selected, position: meshes[selected].position.toArray() });
+      if (undo.length > 30) undo.shift();
+    }
+  }
+  function commitPosition() {
+    layout.objects[selected].position = meshes[selected].position.toArray();
+    selectionChanged();
+  }
+  function setHeight(height) {
+    if (selected === null || !Number.isFinite(height)) return;
+    rememberMove(); meshes[selected].position.y = THREE.MathUtils.clamp(height, -25, 25); commitPosition();
+  }
+  function undoMove() {
+    const previous = undo.pop(); if (!previous) return;
+    selected = previous.index; meshes[selected].position.fromArray(previous.position); commitPosition();
+  }
+  function setMoveMode(enabled) {
+    moveMode = enabled; drag = null;
+    controls.enableDamping = false; controls.update(); controls.enableDamping = true;
+    controls.enabled = !enabled;
+    container.style.cursor = enabled ? 'grab' : '';
+    selectionChanged();
+  }
+  function cast(event) {
+    const bounds = renderer.domElement.getBoundingClientRect();
+    pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
+    raycaster.setFromCamera(pointer, camera);
+  }
+  renderer.domElement.addEventListener('pointerdown', event => {
+    if (!moveMode || event.button !== 0 || drag) return;
+    event.stopImmediatePropagation(); event.preventDefault(); cast(event);
+    const hit = raycaster.intersectObjects(meshes, false)[0];
+    if (!hit) { selectObject(null); return; }
+    selectObject(hit.object.userData.index);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.object.position.y);
+    const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+    if (!point) return;
+    rememberMove();
+    drag = { pointerId: event.pointerId, plane, offset: hit.object.position.clone().sub(point) };
+    renderer.domElement.setPointerCapture(event.pointerId);
+    container.style.cursor = 'grabbing';
+  }, true);
+  renderer.domElement.addEventListener('pointermove', event => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    event.stopImmediatePropagation(); cast(event);
+    const point = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
+    if (!point) return;
+    point.add(drag.offset);
+    meshes[selected].position.x = THREE.MathUtils.clamp(point.x, -25, 25);
+    meshes[selected].position.z = THREE.MathUtils.clamp(point.z, -25, 25);
+    commitPosition();
+  }, true);
+  const release = event => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    event.stopImmediatePropagation(); drag = null; container.style.cursor = 'grab';
+    if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+    selectionChanged();
+  };
+  renderer.domElement.addEventListener('pointerup', release, true);
+  renderer.domElement.addEventListener('pointercancel', release, true);
   const geometries = {
     box: () => new THREE.BoxGeometry(1, 1, 1),
     sphere: () => new THREE.SphereGeometry(0.5, 16, 10),
@@ -46,38 +121,43 @@ export function createStudio(container, ratio) {
   function setScene(next) {
     validateScene(next);
     for (const object of [...world.children]) { world.remove(object); object.geometry.dispose(); object.material.dispose(); }
-    layout = next;
+    // Edits never mutate the response card or an earlier captured frame.
+    layout = structuredClone(next); selected = null; meshes = []; undo = []; drag = null;
     scene.background.set(next.background);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: next.floor, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = -0.02; floor.receiveShadow = true; world.add(floor);
-    for (const object of next.objects) {
+    for (const [index, object] of layout.objects.entries()) {
       const mesh = new THREE.Mesh(geometries[object.shape](), new THREE.MeshStandardMaterial({ color: object.color, roughness: object.roughness, metalness: object.metalness, flatShading: true }));
       mesh.position.fromArray(object.position); mesh.scale.fromArray(object.size); mesh.rotation.fromArray(object.rotation);
-      mesh.castShadow = true; mesh.receiveShadow = true; world.add(mesh);
+      mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.index = index; meshes.push(mesh); world.add(mesh);
     }
-    reset();
+    reset(); selectionChanged();
   }
   function resize() {
     const viewport = container.parentElement;
+    if (!viewport.clientWidth || !viewport.clientHeight) return;
     const [rw, rh] = ratio.value.split(':').map(Number), aspect = rw / rh;
     const width = Math.min(viewport.clientWidth, viewport.clientHeight * aspect), height = width / aspect;
     Object.assign(container.style, { position: 'absolute', width: `${width}px`, height: `${height}px`, left: `${(viewport.clientWidth - width) / 2}px`, top: `${(viewport.clientHeight - height) / 2}px` });
     renderer.setSize(width, height); camera.aspect = aspect; camera.updateProjectionMatrix();
   }
   new ResizeObserver(resize).observe(container.parentElement);
-  renderer.setAnimationLoop(() => { if (!document.hidden) { controls.update(); renderer.render(scene, camera); } });
+  renderer.setAnimationLoop(() => { if (active && !document.hidden) { controls.update(); renderer.render(scene, camera); } });
   function capture() {
     if (!layout) throw new Error('Create a scene first.');
     controls.update();
     const size = new THREE.Vector2(); renderer.getSize(size);
     const pixelRatio = renderer.getPixelRatio(), aspect = camera.aspect;
+    const wasHighlighted = highlight.visible;
     try {
+      highlight.visible = false;
       const [w, h] = ratio.value.split(':').map(Number);
       const width = w >= h ? 1024 : Math.round(1024 * w / h), height = h >= w ? 1024 : Math.round(1024 * h / w);
       renderer.setPixelRatio(1); renderer.setSize(width, height, false);
       camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.render(scene, camera);
-      return { composition: renderer.domElement.toDataURL('image/jpeg', 0.88), position: camera.position.toArray(), target: controls.target.toArray(), ratio: ratio.value };
+      return { scene: structuredClone(layout), composition: renderer.domElement.toDataURL('image/jpeg', 0.88), position: camera.position.toArray(), target: controls.target.toArray(), ratio: ratio.value };
     } finally {
+      highlight.visible = wasHighlighted;
       renderer.setPixelRatio(pixelRatio); renderer.setSize(size.x, size.y, false);
       camera.aspect = aspect; camera.updateProjectionMatrix(); renderer.render(scene, camera);
     }
@@ -86,5 +166,8 @@ export function createStudio(container, ratio) {
     setScene(shot.scene); camera.position.fromArray(shot.position); controls.target.fromArray(shot.target);
     ratio.value = shot.ratio; controls.update(); resize();
   }
-  return { setScene, reset, resize, capture, restore };
+  return { setScene, reset, resize, capture, restore, selectObject, setHeight, setMoveMode, undoMove,
+    getObjects: () => layout?.objects.map((object, index) => ({ name: object.name, index })) || [],
+    setActive: value => { active = value; if (value) resize(); },
+  };
 }

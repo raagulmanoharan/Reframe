@@ -2,51 +2,92 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 const scene = JSON.parse(readFileSync(new URL('./fixtures/scene.json', import.meta.url)));
 async function enterKey(page) { await expect(page.locator('#access-dialog')).toBeVisible(); await page.locator('#access-code').fill('test-only-not-a-real-key'); await page.getByRole('button', { name: 'Continue', exact: true }).click(); }
-for (const mobile of [false, true]) test(`AI workflow using explicit provider fixtures: ${mobile ? 'mobile' : 'desktop'}`, async ({ page }) => {
-  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
-  const errors = [], requests = []; page.on('pageerror', e => errors.push(e.message));
-  await page.route('https://api.openai.com/v1/chat/completions', async route => {
-    const body = route.request().postDataJSON(); requests.push(body);
-    await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify(scene) } }] } });
-  });
-  await page.goto('/'); await expect(page.locator('canvas')).toBeVisible(); await expect(page.locator('#capture')).toBeDisabled();
-  await page.getByRole('button', { name: 'Jewellery', exact: true }).click();
-  await expect(page.locator('#capture')).toBeDisabled(); expect(requests).toHaveLength(0);
-  const reference = Buffer.from(await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 64; c.height = 64; const ctx = c.getContext('2d'); ctx.fillStyle = '#aabbcc'; ctx.fillRect(0, 0, 64, 64); return c.toDataURL('image/png').split(',')[1]; }), 'base64');
+async function upload(page) {
+  const reference = Buffer.from(await page.evaluate(() => { const c = document.createElement('canvas'); c.width = c.height = 64; c.getContext('2d').fillRect(0, 0, 64, 64); return c.toDataURL('image/png').split(',')[1]; }), 'base64');
   await page.locator('#reference').setInputFiles({ name: 'reference.png', mimeType: 'image/png', buffer: reference });
   await expect(page.locator('#upload-title')).toHaveText('reference.png');
-  await page.locator('#prompt').fill('An observatory on the moon with a telescope and antenna');
-  await page.locator('#build').click(); await enterKey(page);
-  await expect(page.locator('#scene-name')).toHaveText('Orbital observatory');
-  expect(requests[0].messages[1].content[1].image_url.url).toMatch(/^data:image\/jpeg/);
-  await page.locator('#capture').click(); const first = await page.locator('.shot-image img').getAttribute('src'); expect(first.length).toBeGreaterThan(10000);
-  const bounds = await page.locator('canvas').boundingBox();
-  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2); await page.mouse.down(); await page.mouse.move(bounds.x + bounds.width / 2 + 65, bounds.y + bounds.height / 2 + 20, { steps: 10 }); await page.mouse.up(); await page.waitForTimeout(400);
-  await page.locator('#ratio').selectOption('9:16'); await page.locator('#capture').click();
-  const second = page.locator('.shot-image img').last(); expect(await second.getAttribute('src')).not.toEqual(first);
-  const dimensions = await second.evaluate(img => [img.naturalWidth, img.naturalHeight]); expect(dimensions[0] / dimensions[1]).toBeCloseTo(9 / 16, 2);
-  // Editing the next brief/reference must not change the input for an existing shot.
-  await page.locator('#prompt').fill('A completely different next scene'); await page.locator('#remove-reference').click();
-  await page.getByRole('checkbox', { name: 'Select shot 2', exact: true }).uncheck();
-  let renderBody = '';
-  await page.route('https://api.openai.com/v1/images/edits', async route => {
-    renderBody = route.request().postData();
-    await route.fulfill({ json: { data: [{ b64_json: first.split(',')[1] }] } });
+}
+async function build(page) { await page.locator('#build').click(); await enterKey(page); await expect(page.locator('#card-title')).toHaveText(scene.title); await expect(page.locator('#studio-panel')).toBeHidden(); await page.locator('#enter-studio').click(); }
+for (const mobile of [false, true]) test(`prompt → studio → four annotated frames → photographs: ${mobile ? 'mobile' : 'desktop'}`, async ({ page }) => {
+  await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+  const errors = [], sceneRequests = [], renderBodies = []; page.on('pageerror', e => errors.push(e.message));
+  await page.route('https://api.openai.com/v1/chat/completions', async route => {
+    sceneRequests.push(route.request().postDataJSON()); await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify(scene) } }] } });
   });
-  await page.locator('#render').click(); await expect(page.getByAltText('AI photograph 1')).toBeVisible();
-  expect(renderBody).toContain('An observatory on the moon'); expect(renderBody).not.toContain('A completely different next scene'); expect(renderBody).toContain('reference.jpeg'); expect(renderBody).toContain('composition.jpeg');
-  await page.getByRole('button', { name: 'Restore shot 1', exact: true }).click(); await expect(page.locator('#photo-dialog')).toBeVisible(); await page.locator('#close-photo').click();
-  const download = page.waitForEvent('download'); await page.locator('#generate').click(); expect((await download).suggestedFilename()).toBe('reframe-photo-1.jpg');
+  await page.goto('/'); await expect(page.locator('#studio-panel')).toBeHidden(); await expect(page.locator('#scene-card')).toBeHidden();
+  await upload(page); await page.locator('#prompt').fill('An observatory on the moon with a telescope and antenna');
+  await page.screenshot({ path: `/tmp/reframe-prompt-${mobile ? 'mobile' : 'desktop'}.png`, fullPage: true });
+  await build(page);
+  expect(sceneRequests[0].messages[1].content[1].image_url.url).toMatch(/^data:image\/jpeg/);
+  const panel = await page.locator('#studio-panel').boundingBox(); expect(panel.x).toBe(0); expect(panel.y).toBe(0); expect(panel.height).toBe(mobile ? 844 : 1000);
+  await page.locator('#annotate').click(); await page.locator('#frame-note').fill('Warm light from the left. Keep the antenna.'); await page.locator('#close-notes').click();
+  await page.locator('#capture').click(); const first = await page.locator('.frame-image img').first().getAttribute('src'); expect(first.length).toBeGreaterThan(10000);
+  // Move a primitive vertically, capture, then restore frame 1. Its original layout must survive.
+  await page.locator('#move-mode').click(); await page.locator('#object-select').selectOption('0');
+  const initialHeight = await page.locator('#object-height').inputValue();
+  await page.locator('#object-height').evaluate(el => { el.value = Number(el.value) + 1.5; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await expect(page.locator('#undo-move')).toBeEnabled();
+  await page.locator('#capture').click(); expect(await page.locator('.frame-image img').nth(1).getAttribute('src')).not.toBe(first);
+  await page.getByRole('button', { name: 'Restore frame 1', exact: true }).click();
+  await page.locator('#object-select').selectOption('0'); expect(await page.locator('#object-height').inputValue()).toBe(initialHeight);
+  await page.locator('#camera-mode').click();
+  const bounds = await page.locator('canvas').boundingBox();
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2); await page.mouse.down(); await page.mouse.move(bounds.x + bounds.width / 2 + 65, bounds.y + bounds.height / 2 + 20, { steps: 10 }); await page.mouse.up(); await page.waitForTimeout(300);
+  await page.locator('#ratio').selectOption('9:16'); await page.locator('#capture').click();
+  const third = page.locator('.frame-image img').nth(2); expect(await third.getAttribute('src')).not.toBe(first);
+  const dimensions = await third.evaluate(img => [img.naturalWidth, img.naturalHeight]); expect(dimensions[0] / dimensions[1]).toBeCloseTo(9 / 16, 2);
+  await page.locator('#capture').click(); await expect(page.locator('#capture')).toBeDisabled(); await expect(page.locator('#shot-count')).toHaveText('4 / 4 frames');
+  await page.getByRole('button', { name: 'Delete frame 4', exact: true }).click(); await expect(page.locator('#capture')).toBeEnabled(); await page.locator('#capture').click();
+  await page.screenshot({ path: `/tmp/reframe-studio-${mobile ? 'mobile' : 'desktop'}.png` });
+  await page.locator('#exit-studio').click(); await page.locator('#prompt').fill('A completely different next scene'); await page.locator('#remove-reference').click(); await page.locator('#enter-studio').click();
+  await page.route('https://api.openai.com/v1/images/edits', async route => { renderBodies.push(route.request().postData()); await route.fulfill({ json: { data: [{ b64_json: first.split(',')[1] }] } }); });
+  await page.getByRole('button', { name: 'Let’s Go', exact: true }).click();
+  await expect(page.locator('#studio-panel')).toBeHidden(); await expect(page.getByAltText('AI photograph 4')).toBeVisible();
+  expect(renderBodies).toHaveLength(4);
+  expect(renderBodies[0]).toContain('Warm light from the left. Keep the antenna.'); expect(renderBodies[1]).not.toContain('Warm light from the left. Keep the antenna.');
+  for (const body of renderBodies) { expect(body).toContain('An observatory on the moon'); expect(body).not.toContain('A completely different next scene'); expect(body).toContain('reference.jpeg'); }
+  await page.getByRole('button', { name: 'View photograph 1', exact: true }).click(); await expect(page.locator('#photo-dialog')).toBeVisible(); await page.locator('#close-photo').click();
+  const download = page.waitForEvent('download'); await page.getByRole('link', { name: 'Download photograph 1', exact: true }).click(); expect((await download).suggestedFilename()).toBe('reframe-photo-1.jpg');
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
-  expect(await page.locator('#access-code').inputValue()).toBe('');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true); expect(errors).toEqual([]);
-  await page.screenshot({ path: `/tmp/reframe-ai-${mobile ? 'mobile' : 'desktop'}.png`, fullPage: true });
-  await page.reload(); await page.locator('#build').click(); await expect(page.locator('#access-dialog')).toBeVisible(); await page.locator('#cancel-access').click();
-  await expect(page.locator('#capture')).toBeDisabled(); await expect(page.locator('#error')).toContainText('cancelled');
+  await page.screenshot({ path: `/tmp/reframe-results-${mobile ? 'mobile' : 'desktop'}.png`, fullPage: true });
 });
-test('provider failure leaves an honest error and no fake scene', async ({ page }) => {
-  await page.route('https://api.openai.com/v1/chat/completions', route => route.fulfill({ status: 401, json: { error: { message: 'bad key' } } }));
-  await page.goto('/'); await page.locator('#build').click(); await enterKey(page);
-  await expect(page.locator('#error')).toContainText('key was not accepted'); await expect(page.locator('#capture')).toBeDisabled(); await expect(page.locator('#scene-empty')).toBeVisible();
-  await page.locator('#build').click(); await expect(page.locator('#access-dialog')).toBeVisible();
+test('image-only input produces a scene card; empty input and provider failures never fabricate a scene', async ({ page }) => {
+  await page.route('https://api.openai.com/v1/chat/completions', async route => {
+    expect(route.request().postDataJSON().messages[1].content[0].text).toContain('reference image');
+    await route.fulfill({ status: 401, json: { error: { message: 'bad key' } } });
+  });
+  await page.goto('/'); await page.locator('#build').click(); await expect(page.locator('#error')).toContainText('add an image'); await expect(page.locator('#access-dialog')).toBeHidden();
+  await upload(page); await page.locator('#build').click(); await enterKey(page);
+  await expect(page.locator('#error')).toContainText('key was not accepted'); await expect(page.locator('#scene-card')).toBeHidden(); await expect(page.locator('#studio-panel')).toBeHidden();
+  await page.locator('#build').click(); await expect(page.locator('#access-dialog')).toBeVisible(); await page.locator('#cancel-access').click(); await expect(page.locator('#error')).toHaveText('Generation cancelled.');
+});
+test('partial image failure keeps completed images and retries only unfinished frames', async ({ page }) => {
+  await page.route('https://api.openai.com/v1/chat/completions', route => route.fulfill({ json: { choices: [{ message: { content: JSON.stringify(scene) } }] } }));
+  await page.goto('/'); await page.locator('#prompt').fill('An observatory'); await build(page);
+  await page.locator('#capture').click(); await page.locator('#capture').click();
+  const image = (await page.locator('.frame-image img').first().getAttribute('src')).split(',')[1]; let calls = 0;
+  await page.route('https://api.openai.com/v1/images/edits', route => { calls++; return route.fulfill(calls === 2 ? { status: 429, json: { error: {} } } : { json: { data: [{ b64_json: image }] } }); });
+  await page.locator('#render').click(); await expect(page.getByAltText('AI photograph 1')).toBeVisible(); await expect(page.locator('#retry-render')).toBeVisible(); await expect(page.locator('#error')).toContainText('rate limiting');
+  await page.locator('#retry-render').click(); await expect(page.getByAltText('AI photograph 2')).toBeVisible(); expect(calls).toBe(3);
+});
+test('object dragging changes the composition, undo restores it, and controls fit small screens', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.route('https://api.openai.com/v1/chat/completions', route => route.fulfill({ json: { choices: [{ message: { content: JSON.stringify(scene) } }] } }));
+  await page.goto('/'); await page.locator('#prompt').fill('An observatory'); await build(page);
+  await page.locator('#capture').click(); const original = await page.locator('.frame-image img').first().getAttribute('src');
+  await page.locator('#move-mode').click();
+  const canvas = await page.locator('canvas').boundingBox();
+  await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2); await page.mouse.down();
+  await page.mouse.move(canvas.x + canvas.width / 2 + 35, canvas.y + canvas.height / 2 + 10, { steps: 8 }); await page.mouse.up();
+  expect(await page.locator('#object-select').inputValue()).not.toBe('');
+  await page.locator('#capture').click(); expect(await page.locator('.frame-image img').nth(1).getAttribute('src')).not.toBe(original);
+  await page.locator('#undo-move').click(); await page.locator('#capture').click(); expect(await page.locator('.frame-image img').nth(2).getAttribute('src')).toBe(original);
+  for (const size of [{ width: 320, height: 568 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(size);
+    const button = await page.locator('#render').boundingBox();
+    expect(button.y + button.height).toBeLessThanOrEqual(size.height);
+    const panel = await page.locator('#studio-panel').boundingBox(); expect(panel.y).toBe(0); expect(panel.height).toBe(size.height);
+  }
+  await page.keyboard.press('Escape'); await expect(page.locator('#studio-panel')).toBeHidden();
 });

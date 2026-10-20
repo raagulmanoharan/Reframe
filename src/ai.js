@@ -1,4 +1,5 @@
 import { sceneSchema, validateScene } from '../lib/scene-schema.js';
+import { sceneBrief, notesInstruction } from '../lib/generation-input.js';
 
 function description(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 4000) throw new Error('Describe your scene in 1–4,000 characters.');
@@ -39,7 +40,7 @@ async function openai(path, key, options, timeout = 120000) {
   return data;
 }
 export async function generateScene(key, input) {
-  const prompt = description(input.prompt), reference = image(input.reference);
+  const reference = image(input.reference), prompt = sceneBrief(input.prompt, reference);
   const content = [{ type: 'text', text: prompt }];
   if (reference) content.push({ type: 'image_url', image_url: { url: reference.data, detail: 'high' } });
   const result = await openai('chat/completions', key, {
@@ -56,10 +57,11 @@ export async function generateScene(key, input) {
 }
 export async function generatePhoto(key, input) {
   const prompt = description(input.prompt), composition = image(input.composition, true), reference = image(input.reference);
+  const notes = notesInstruction(input.notes);
   if (!['4:3', '1:1', '9:16', '16:9'].includes(input.ratio)) throw new Error('Invalid aspect ratio.');
   const form = new FormData();
   form.set('model', 'gpt-image-1');
-  form.set('prompt', `Turn the first image, a low-poly composition draft, into a high-quality photorealistic photograph. Scene brief: ${prompt}\nPreserve the first image's camera viewpoint, framing, perspective, main subject position, scale and spatial relationships as closely as possible. Replace block geometry with realistic forms, materials, lighting and detail. Do not introduce text or watermarks. The intended aspect ratio is ${input.ratio}. ${reference ? 'The SECOND image is the actual product reference: preserve its design, proportions, colors, materials and distinctive details while placing it at the location and orientation in the first image. It is not a reference for composition.' : ''}`);
+  form.set('prompt', `Turn the first image, a low-poly composition draft, into a high-quality photorealistic photograph. Scene brief: ${prompt}\nPreserve the first image's camera viewpoint, framing, perspective, main subject position, scale and spatial relationships as closely as possible. Replace block geometry with realistic forms, materials, lighting and detail. Do not introduce text or watermarks. The intended aspect ratio is ${input.ratio}. ${reference ? 'The SECOND image is the actual product reference: preserve its design, proportions, colors, materials and distinctive details while placing it at the location and orientation in the first image. It is not a reference for composition.' : ''}${notes}`);
   form.append('image[]', composition.blob, `composition.${composition.extension}`);
   if (reference) form.append('image[]', reference.blob, `reference.${reference.extension}`);
   form.set('quality', 'high'); form.set('input_fidelity', 'high'); form.set('n', '1');

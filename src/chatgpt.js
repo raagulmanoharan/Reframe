@@ -14,7 +14,7 @@ async function request(path, data) {
   return result;
 }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-export function setupChatGPT() {
+export function setupChatGPT({ onAccountChange = () => {} } = {}) {
   const dialog = $('#access-dialog');
   dialog.innerHTML = `<h2>Connect ChatGPT</h2>
     <p>Sign in once, then create your scene. Your ChatGPT plan and usage limits apply.</p>
@@ -22,11 +22,12 @@ export function setupChatGPT() {
     <div id="device-login" hidden><p>Enter this code on OpenAI’s sign-in page:</p><strong id="device-code"></strong>
     <p><a id="device-link" target="_blank" rel="noopener noreferrer">Open ChatGPT sign-in ↗</a></p>
     <small>Return here after signing in. If asked, enable device code sign-in in your ChatGPT security settings.</small></div>
-    <div class="dialog-actions"><button id="sign-out" hidden>Sign out</button><button id="cancel-access">Close</button><button id="chatgpt-login" class="primary">Sign in with ChatGPT</button></div>`;
+    <div class="dialog-actions"><button id="sign-out" class="quiet" hidden>Sign out</button><button id="cancel-access" class="quiet">Close</button><button id="chatgpt-login" class="primary">Sign in with ChatGPT</button></div>`;
   let waiting = null, polling = 0;
   const status = text => { $('#login-status').textContent = text; };
   async function refresh() {
     const account = await request('auth');
+    if (account.state !== 'pending') onAccountChange(account.state === 'signedIn');
     $('#sign-out').hidden = account.state !== 'signedIn';
     $('#chatgpt-login').hidden = account.state === 'signedIn';
     if (account.state === 'signedIn') {
@@ -47,10 +48,10 @@ export function setupChatGPT() {
     $('#chatgpt-login').disabled = false;
   });
   $('#sign-out').onclick = async () => {
-    try { await request('auth/logout', {}); status('Signed out.'); await refresh(); }
+    try { await request('auth/logout', {}); location.reload(); }
     catch (error) { status(error.message); }
   };
-  $('#chatgpt-login').onclick = async () => {
+  async function beginLogin() {
     const attempt = ++polling;
     $('#chatgpt-login').disabled = true; status('Connecting to OpenAI…');
     try {
@@ -73,14 +74,16 @@ export function setupChatGPT() {
       if (attempt === polling) throw new Error('This sign-in code expired. Please try again.');
     } catch (error) { if (attempt === polling) status(error.message); }
     finally { if (attempt === polling) $('#chatgpt-login').disabled = false; }
-  };
+  }
+  $('#chatgpt-login').onclick = beginLogin;
   async function ensureSignedIn() {
-    if ((await request('auth')).state === 'signedIn') return;
+    if (await refresh() === 'signedIn') return;
     const completed = new Promise(resolve => { waiting = resolve; });
     await show();
+    if (waiting) void beginLogin();
     if (!await completed) throw new Error('Generation cancelled.');
   }
-  return async (path, payload) => {
+  const generate = async (path, payload) => {
     await ensureSignedIn();
     const { jobId } = await request(path === 'scene' ? 'scene' : 'photo', payload);
     const deadline = Date.now() + 330000;
@@ -91,4 +94,5 @@ export function setupChatGPT() {
     }
     throw new Error('Generation timed out. Please try again.');
   };
+  return Object.assign(generate, { signIn: ensureSignedIn, refresh });
 }

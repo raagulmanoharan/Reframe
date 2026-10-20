@@ -114,9 +114,13 @@ test('image requests use the composition and reference in order and require a re
     }
     return {};
   };
-  const result = await worker.generate('photo', { prompt: 'sofa', composition, reference, ratio: '4:3' });
+  const result = await worker.generate('photo', { prompt: 'sofa', composition, reference, ratio: '4:3', notes: 'Keep the blue fabric.' });
   assert.deepEqual(input.slice(0, 2), [{ type: 'image', url: composition }, { type: 'image', url: reference }]);
   assert.match(input[2].text, /num_last_images_to_include=2/);
+  assert.match(input[2].text, /Keep the blue fabric/);
+  assert.match(input[2].text, /highest available detail/);
   assert.equal(result.image, 'data:image/png;base64,aW1hZ2U=');
   assert.throws(() => validateInput('photo', { prompt: 'sofa', composition: '/etc/passwd', ratio: '4:3' }));
+  assert.throws(() => validateInput('photo', { prompt: 'sofa', composition, ratio: '4:3', notes: 'x'.repeat(1001) }), /notes/);
+  assert.match(validateInput('scene', { reference }).prompt, /reference image/);
 });

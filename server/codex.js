@@ -5,14 +5,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { sceneSchema, validateScene } from '../lib/scene-schema.js';
+import { sceneBrief, frameNotes, notesInstruction } from '../lib/generation-input.js';
 
 export class AppError extends Error {
   constructor(message, status = 502) { super(message); this.status = status; }
 }
 
 export function validateInput(kind, input) {
-  if (!input || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 4000)
-    throw new AppError('Describe your scene in 1–4,000 characters.', 400);
+  if (!input) throw new AppError('Describe a scene, add an image, or both.', 400);
   const image = (value, required = false) => {
     if (!value && !required) return null;
     if (typeof value !== 'string' || value.length > 1_500_000 ||
@@ -20,7 +20,11 @@ export function validateInput(kind, input) {
       throw new AppError('Use a JPG, PNG, or WEBP image smaller than 1 MB.', 400);
     return value;
   };
-  const result = { prompt: input.prompt.trim(), reference: image(input.reference) };
+  const reference = image(input.reference);
+  let prompt, notes;
+  try { prompt = sceneBrief(input.prompt, reference); notes = frameNotes(input.notes); }
+  catch (error) { throw new AppError(error.message, 400); }
+  const result = { prompt, reference, notes };
   if (kind === 'photo') {
     result.composition = image(input.composition, true);
     if (!['4:3', '1:1', '9:16', '16:9'].includes(input.ratio)) throw new AppError('Invalid aspect ratio.', 400);
@@ -160,8 +164,9 @@ export class CodexSession extends EventEmitter {
       if (data.composition) inputItems.push({ type: 'image', url: data.composition });
       if (data.reference) inputItems.push({ type: 'image', url: data.reference });
       inputItems.push({ type: 'text', text: kind === 'scene' ? data.prompt :
-        `Turn the FIRST image, a low-poly composition, into a photorealistic photograph. Preserve viewpoint, framing, perspective, subject placement and scale. Scene: ${data.prompt}.
+        `Turn the FIRST image, a low-poly composition, into a polished photorealistic photograph with the highest available detail and image quality. Preserve viewpoint, framing, perspective, subject placement and scale. Scene: ${data.prompt}.
 The intended aspect ratio is ${data.ratio}. ${data.reference ? 'The SECOND image is the product reference. Preserve its design, colors and proportions; it does not define the composition.' : ''}
+${notesInstruction(data.notes)}
 Use image_gen.imagegen with num_last_images_to_include=${data.reference ? 2 : 1}, transparent_background=false. Do not use referenced_image_paths. Generate one image now.` });
       const items = new Map();
       let settle, fail;

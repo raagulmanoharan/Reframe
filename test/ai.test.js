@@ -25,16 +25,25 @@ test('scene request uses actual OpenAI endpoint, vision input, and structured ou
     return Response.json({ choices: [{ message: { content: JSON.stringify(fixture) } }] });
   }, async () => assert.equal((await generateScene('test-only', { prompt: 'An observatory on the moon', reference: png })).scene.title, fixture.title));
 });
-test('photo edit sends captured composition first and reference second', async () => {
+test('photo edit sends composition, product reference and frame notes at high quality', async () => {
   await provider(async (url, options) => {
     assert.equal(url, 'https://api.openai.com/v1/images/edits');
     assert.equal(options.body.get('model'), 'gpt-image-1');
     assert.equal(options.body.get('input_fidelity'), 'high');
+    assert.equal(options.body.get('quality'), 'high');
+    assert.match(options.body.get('prompt'), /Keep the emerald green/);
     assert.equal(options.body.get('size'), '1024x1536');
     const images = options.body.getAll('image[]'); assert.equal(images.length, 2);
     assert.equal(images[0].name, 'composition.png'); assert.equal(images[1].name, 'reference.png');
     return Response.json({ data: [{ b64_json: png.split(',')[1] }] });
-  }, async () => assert.match((await generatePhoto('test-only', { prompt: 'A ring', reference: png, composition: png, ratio: '9:16' })).image, /^data:image\/jpeg;base64,/));
+  }, async () => assert.match((await generatePhoto('test-only', { prompt: 'A ring', reference: png, composition: png, ratio: '9:16', notes: 'Keep the emerald green' })).image, /^data:image\/jpeg;base64,/));
+});
+test('a reference image alone is a valid scene brief', async () => {
+  await provider(async (url, options) => {
+    const content = JSON.parse(options.body).messages[1].content;
+    assert.match(content[0].text, /reference image/); assert.equal(content[1].image_url.url, png);
+    return Response.json({ choices: [{ message: { content: JSON.stringify(fixture) } }] });
+  }, async () => assert.equal((await generateScene('test-only', { reference: png })).scene.title, fixture.title));
 });
 test('provider errors and invalid responses never become a preset scene', async () => {
   for (const [status, expected] of [[401, /key was not accepted/], [403, /account cannot access/], [429, /rate limiting/], [500, /unavailable/]]) {
@@ -47,5 +56,6 @@ test('rejects blank prompts and non-image input before spending API credit', asy
     await assert.rejects(generateScene('test-only', { prompt: '' }), /Describe/);
     await assert.rejects(generateScene('test-only', { prompt: 'Hello', reference: 'https://evil.example/a.png' }), /JPG/);
     await assert.rejects(generatePhoto('test-only', { prompt: 'Hello', composition: png, ratio: 'invalid' }), /aspect ratio/);
+    await assert.rejects(generatePhoto('test-only', { prompt: 'Hello', composition: png, ratio: '4:3', notes: 'x'.repeat(1001) }), /notes/);
   });
 });

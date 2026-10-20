@@ -1,63 +1,27 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f8f7f4">
-  <meta name="description" content="Describe a scene. Find your angle. Capture it. A simple 3D composition playground.">
-  <title>Reframe — Find your angle</title>
-</head>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f8f7f4"><meta name="description" content="Describe it. Frame it. Make it real. Your own AI photo studio."><title>Reframe — Your scene. Your angle.</title></head>
 <body>
-  <div id="app">
-    <header>
-      <a class="brand" href="./">reframe<span>✳</span></a>
-      <div class="header-actions"><button id="access-settings" class="icon-button" aria-label="AI settings"><i data-lucide="key-round"></i></button><button id="help" class="icon-button" aria-label="How to use Reframe"><i data-lucide="circle-help"></i></button></div>
-    </header>
-    <main>
-      <section class="brief" aria-label="Describe your scene">
-        <h1>Find your angle.</h1>
-        <p class="intro">A scene. Your perspective.</p>
-        <label class="sr-only" for="prompt">Describe your scene</label>
-        <textarea id="prompt" maxlength="4000" rows="2" placeholder="What do you want to shoot?">A sofa in a warm, sunlit living room.</textarea>
-        <div class="presets" aria-label="Try a scene">
-          <button class="preset active" data-scene="living">Living room</button>
-          <button class="preset" data-scene="jewellery">Jewellery</button>
-          <button class="preset" data-scene="industrial">Industrial</button>
-        </div>
-        <div class="brief-actions">
-          <label class="upload" for="reference"><span id="upload-icon"><i data-lucide="image-plus"></i></span><span id="upload-title">Add reference</span><input id="reference" type="file" accept="image/jpeg,image/png,image/webp"></label>
-          <button id="remove-reference" class="icon-button" aria-label="Remove reference" hidden>×</button>
-          <button id="build" class="primary">Create scene <i data-lucide="arrow-up-right"></i></button>
-        </div>
-        <p id="status" class="prototype-note" role="status">Describe a scene to begin.</p><p id="error" role="alert" hidden></p>
-      </section>
-      <section class="workspace" aria-label="Camera and saved shots">
-        <div id="viewport">
-          <div id="canvas-wrap"></div>
-          <div class="view-top"><span id="scene-name">YOUR NEXT SCENE</span><button id="reset" class="glass" aria-label="Reset camera"><i data-lucide="rotate-ccw"></i> Reset</button></div>
-          <div id="webgl-error" hidden>3D preview needs WebGL. Open this page in a browser with hardware acceleration.</div>
-          <div id="scene-empty"><i data-lucide="sparkles"></i><span>Your imagination goes here.</span><small>Describe it, then create your scene.</small></div><div id="flash"></div>
-        </div>
-        <div class="camera-bar">
-          <p class="gesture">Drag to orbit<span>Pinch to zoom · Two fingers to pan</span></p>
-          <button id="capture" disabled aria-label="Capture shot"><span></span></button>
-          <label class="select-wrap"><span class="sr-only">Shot aspect ratio</span><select id="ratio" aria-label="Shot aspect ratio"><option value="4:3">4:3</option><option value="1:1">1:1</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select></label>
-        </div>
-        <div class="shots-heading"><h2>Your shots <span id="shot-count">0 shots</span></h2><div class="shot-actions"><button id="render" disabled>Generate photos <i data-lucide="sparkles"></i></button><button id="generate" disabled aria-label="Download selected shots"><i data-lucide="download"></i></button></div></div>
-        <div id="shots"><div class="empty-shot">Find a view you like. Tap the shutter.</div></div>
-      </section>
-    </main>
-    <div id="toast" role="status"></div>
-    <dialog id="help-dialog">
-      <button id="close-help" class="icon-button" aria-label="Close help">×</button>
-      <h2>Your own little photo studio.</h2>
-      <p>Describe any scene and optionally add a product reference. AI turns it into a rough 3D composition. Drag to orbit, pinch or scroll to move closer, and use two fingers or right-drag to pan.</p>
-      <p>Capture your favourite angles, then select Generate photos. Each selected composition and its reference are sent to the AI image model. Tap a finished photo to view it. Download saves your selected photos or composition drafts.</p>
-      <p>AI approximates the reference in 3D; it is not an exact reconstruction. Review final images for product accuracy. Images use the model’s supported output sizes, so aspect ratios may vary slightly. Shots clear when you reload.</p><p id="privacy-note">Prompts, references, and captures are sent directly to OpenAI when you generate. Your API key stays in tab memory and is cleared on reload. This app has no backend and does not store your images or key.</p>
-    </dialog>
-    <dialog id="access-dialog"><form id="access-form"><h2>Connect OpenAI</h2><p>Use your own OpenAI API key. It stays in this tab’s memory and is sent only to OpenAI. Generation is billed to your OpenAI account.</p><label for="access-code">OpenAI API key</label><input id="access-code" type="password" autocomplete="off" spellcheck="false" required><div class="dialog-actions"><button type="button" id="forget-key">Forget key</button><button type="button" id="cancel-access">Cancel</button><button class="primary" type="submit">Continue</button></div></form></dialog>
-    <dialog id="photo-dialog"><button id="close-photo" class="icon-button" aria-label="Close photo">×</button><img id="photo-preview" alt="Generated photograph"></dialog>
-  </div>
-  <script type="module" src="/src/main.js"></script>
-</body>
-</html>
+<div id="app"><header class="app-header"><a class="brand" href="./">reframe<span>✳</span></a><div class="header-actions"><button id="access-settings" class="quiet">Account</button><button id="help" class="icon-button" aria-label="How to use Reframe"><i data-lucide="circle-help"></i></button></div></header>
+<main>
+<section id="welcome" class="welcome" hidden><span class="eyebrow">YOUR OWN PHOTO STUDIO</span><h1>Your scene.<br>Your angle.</h1><p>Describe an idea. Step inside it.<br>Frame the image you actually want.</p><button id="welcome-login" class="primary">Continue with ChatGPT <i data-lucide="arrow-up-right"></i></button><small>Uses your ChatGPT account and available usage.</small><p id="welcome-status" role="status"></p></section>
+<section id="conversation" hidden>
+<div class="intro"><span class="eyebrow">IMAGINATION, WITH DIRECTION</span><h1>What do you have in mind?</h1><p>A few words, a reference image, or both.</p></div>
+<form id="brief-form" class="composer"><label class="sr-only" for="prompt">Describe your scene</label><textarea id="prompt" maxlength="4000" rows="3" placeholder="A sculptural sofa in a sunlit room…"></textarea><div class="composer-actions"><div class="reference-controls"><label class="upload" for="reference"><span id="upload-icon"><i data-lucide="image-plus"></i></span><span id="upload-title">Add image</span><input id="reference" type="file" accept="image/jpeg,image/png,image/webp"></label><button type="button" id="remove-reference" class="icon-button" aria-label="Remove reference" hidden>×</button></div><button id="build" class="primary" type="submit">Create scene <i data-lucide="arrow-up-right"></i></button></div></form>
+<div class="presets" aria-label="Try an idea"><button class="preset" data-scene="living">A living room</button><button class="preset" data-scene="jewellery">Jewellery</button><button class="preset" data-scene="industrial">An industrial scene</button></div>
+<p id="status" class="status" role="status"></p><p id="error" class="error" role="alert" hidden></p><p id="webgl-error" class="error" hidden>Your browser needs WebGL to open the studio. Try a browser with hardware acceleration.</p>
+<article id="scene-card" class="scene-card" hidden><img id="scene-preview" alt="Your low-poly scene composition"><div class="scene-card-body"><span class="eyebrow">YOUR SCENE IS READY</span><h2 id="card-title"></h2><p>Step inside. Find your angle. Capture up to four frames.</p><button id="enter-studio" class="primary">Enter Studio <i data-lucide="arrow-up-right"></i></button></div></article>
+<section id="results" aria-label="Generated photographs" hidden><div class="results-heading"><div><span class="eyebrow">FROM YOUR PERSPECTIVE</span><h2 id="results-title">Making your images…</h2></div><button id="retry-render" class="quiet" hidden>Try remaining frames</button></div><p id="results-status" class="status" role="status"></p><div id="result-grid"></div></section><p class="footnote">Describe it. Frame it. Make it real.</p>
+</section></main></div>
+<section id="studio-panel" role="dialog" aria-modal="true" aria-label="Photo studio" hidden>
+<div class="studio-header"><button id="exit-studio" class="quiet"><i data-lucide="arrow-left"></i> Back</button><h2 id="scene-name">Your studio</h2><button id="reset" class="icon-button" aria-label="Reset camera"><i data-lucide="rotate-ccw"></i></button></div>
+<div class="studio-toolbar"><div class="mode-switch" aria-label="Studio controls"><button id="camera-mode" aria-pressed="true"><i data-lucide="camera"></i> Camera</button><button id="move-mode" aria-pressed="false"><i data-lucide="move"></i> Move objects</button></div><label><span class="sr-only">Shot aspect ratio</span><select id="ratio" aria-label="Shot aspect ratio"><option>4:3</option><option>1:1</option><option>9:16</option><option>16:9</option></select></label></div>
+<div id="viewport"><div id="canvas-wrap"></div><div id="flash"></div><p id="gesture-hint">Drag to orbit · Pinch to zoom · Two fingers to pan</p></div>
+<div id="object-controls" hidden><label class="sr-only" for="object-select">Choose an object</label><select id="object-select" aria-label="Choose an object"><option value="">Tap a shape to move it</option></select><label class="height-control">Height <input id="object-height" type="range" min="-25" max="25" step="0.05" value="0" disabled></label><button id="undo-move" class="icon-button" aria-label="Undo object move" disabled><i data-lucide="rotate-ccw"></i></button></div>
+<div class="capture-controls"><button id="annotate" class="quiet"><i data-lucide="message-square"></i> <span id="note-label">Add note</span></button><button id="capture" disabled aria-label="Capture frame"><span></span></button><span id="shot-count">0 / 4 frames</span></div><div id="shots" aria-label="Captured frames"></div><div class="studio-footer"><span id="studio-hint">Capture a frame to get started.</span><button id="render" class="primary" disabled>Let’s Go <i data-lucide="arrow-up-right"></i></button></div>
+<div id="notes-panel" hidden><div class="notes-heading"><h2 id="notes-title">Note for your next frame</h2><button id="close-notes" class="quiet">Done</button></div><label class="sr-only" for="frame-note">Frame annotation</label><textarea id="frame-note" maxlength="1000" rows="3" placeholder="Keep the sofa’s fabric texture. Add warm light from the left…"></textarea><small>Sent to the AI with this frame.</small></div>
+</section>
+<div id="toast" role="status"></div>
+<dialog id="help-dialog"><button id="close-help" class="icon-button close-dialog" aria-label="Close help">×</button><h2>From an idea to your image.</h2><p>Write a scene, add an image, or both. When your scene is ready, select Enter Studio.</p><p>Drag to orbit, pinch or scroll to zoom, and use two fingers or right-drag to pan. In Move objects, tap a shape and drag it across the ground. Use Height to lift it.</p><p>Add a note, capture up to four frames, then select Let’s Go. Each frame’s composition, product reference and notes guide its image. Download your images before reloading.</p><p>AI can change details and framing. Check product accuracy in the final images.</p><p id="privacy-note">Your API key stays in tab memory. Prompts and images go directly to OpenAI when you generate.</p></dialog>
+<dialog id="access-dialog"><form id="access-form"><h2>Connect OpenAI</h2><p>This static version uses your OpenAI API key. It stays in tab memory. Generation is billed to your API account.</p><label for="access-code">OpenAI API key</label><input id="access-code" type="password" autocomplete="off" spellcheck="false" required><div class="dialog-actions"><button type="button" id="forget-key" class="quiet">Forget key</button><button type="button" id="cancel-access" class="quiet">Cancel</button><button class="primary" type="submit">Continue</button></div></form></dialog>
+<dialog id="photo-dialog"><button id="close-photo" class="icon-button close-dialog" aria-label="Close photo">×</button><img id="photo-preview" alt="Generated photograph"></dialog>
+<script type="module" src="/src/main.js"></script></body></html>

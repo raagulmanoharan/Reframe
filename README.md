@@ -1,6 +1,6 @@
 # Reframe
 
-A mobile-first 3D camera for AI image generation. Describe any scene and optionally upload a product reference. OpenAI generates a structured layout of primitives; Three.js renders it as a navigable low-poly scene. Frame a shot while seated, then generate a photograph from that exact captured composition and reference.
+A mobile-first 3D camera for AI image generation. Start with a description, a reference image, or both. OpenAI generates a low-poly scene; a response card opens the full-screen Three.js studio. Frame up to four shots while seated, add visual direction, and generate photographs guided by those compositions.
 
 ## Deploy on Render
 
@@ -10,9 +10,12 @@ The repository includes a `render.yaml` Blueprint for one **free** Docker web se
 
 On the Render app:
 
-1. Describe the scene and tap **Create scene**.
-2. Select **Sign in with ChatGPT**. Open the OpenAI sign-in link, enter the displayed code, and return to Reframe. OpenAI may require enabling device code sign-in in ChatGPT security settings.
-3. Orbit, zoom and pan to frame the scene. Capture a shot, then **Generate photos**.
+1. Select **Continue with ChatGPT**. Open the OpenAI sign-in link, enter the displayed code, and return to Reframe. OpenAI may require enabling device code sign-in in ChatGPT security settings. This is device-code authentication, not a Google-style OAuth redirect.
+2. Type a scene, add an image, or both, then **Create scene**.
+3. Select **Enter Studio** on the response card. The studio fills the browser viewport on phones and desktops.
+4. Orbit, zoom and pan. **Move objects** lets you tap and drag individual shapes across the ground, adjust their height, and undo movement.
+5. Add an optional text note and capture up to **four frames**. Each frame snapshots the edited geometry, camera, reference, and note. Restoring a draft frame lets you edit its note; subsequent scene edits do not mutate its captured composition.
+6. Select **Let’s Go**. Photographs appear on the main screen with individual **Save** links. If a batch fails partway through, completed images remain available and retry generates only unfinished frames.
 
 This integration uses the official Codex app-server (`@openai/codex` pinned to `0.163.0`) and its `chatgptDeviceCode` login, structured scene output, and image-generation tool. A ChatGPT account with appropriate Codex/image access and remaining usage is required. **Live sign-in and image generation still need an end-to-end account test; protocol and fixture tests do not verify account entitlement.** There is no simulated production output.
 
@@ -35,11 +38,10 @@ The health endpoint is `/api/health`. In a managed environment, follow its Docke
 
 Pages remains a static, API-key version. It cannot run the ChatGPT sign-in backend. Its usage is:
 
-1. Open the app and select **Create scene**.
-2. Enter your own OpenAI API key. It is kept only in JavaScript memory, never bundled, persisted, or sent to a Reframe server. Reload or **AI settings → Forget key** clears it.
-3. Drag to orbit, pinch/scroll to move closer, and two-finger/right-drag to pan.
-4. Capture angles, select shots, and choose **Generate photos**.
-5. View and download the photographs. Downloads of unfinished shots are clearly named composition drafts.
+1. Describe the scene, add a reference, or both, then select **Create scene**.
+2. Enter your own OpenAI API key. It is kept only in JavaScript memory, never bundled, persisted, or sent to a Reframe server. Reload or **Account → Forget key** clears it.
+3. Select **Enter Studio**, frame up to four shots and add optional notes.
+4. Choose **Let’s Go**, then view and save the generated photographs.
 
 Generation is billed to the user's OpenAI API account. Scene generation uses `gpt-4.1-mini`; image editing uses `gpt-image-1` with high input fidelity. The account needs API credit and access to those models (image generation may require organization verification). Product references and composition images are sent directly to OpenAI over HTTPS, only on generation. There are no preset scene fallbacks or fake generated images. The scene chips only fill the prompt.
 
@@ -57,10 +59,12 @@ npm run dev
 ## Boundaries
 
 - Generated scenes approximate product references with low-poly primitives; this is not mesh reconstruction.
+- Object movement edits individual primitive shapes, not an automatically grouped product mesh. Notes are text annotations attached to a frame, not a drawing layer.
 - Image generation is guided by the captured view but may alter composition or product details. Review outputs before commercial use.
+- The API-key version explicitly requests high image quality and high input fidelity. The ChatGPT version asks for the highest available detail; Codex's image tool controls the actual quality and output resolution automatically.
 - GPT Image returns square, landscape, or portrait sizes. Exported AI photo aspect ratios can differ from the selected draft ratio; the app preserves the original output without cropping it.
 - References are resized to 1024 px for upload. Shots and keys clear on reload.
-- This personal POC uses a user-entered key in the browser. A shared commercial service should use an authenticated backend with server-side credentials.
+- The static Pages version uses a user-entered key in the browser; the Render version uses the session backend described above.
 
 ## Verification
 
@@ -71,7 +75,7 @@ npm run test:hosted
 npm run build
 ```
 
-Unit tests check scene validation, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit test fixtures to exercise upload, scenes, camera movement, capture/restore, image generation, and both sign-in interfaces without spending credit. These fixtures are not bundled into the app. Live provider checks require an authorized account.
+Unit tests check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, response cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, and partial-failure recovery. These fixtures are not bundled into the app. Live provider checks require an authorized account.
 
 Playwright uses `/usr/bin/chromium` by default; set `CHROMIUM_PATH` if needed. Tests start Vite automatically. Physical multitouch ergonomics still need a device trial.
 
