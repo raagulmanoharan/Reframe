@@ -18,6 +18,9 @@ for (const mobile of [false, true]) test(`prompt → studio → four annotated f
   await upload(page); await page.locator('#prompt').fill('An observatory on the moon with a telescope and antenna');
   await page.screenshot({ path: `/tmp/reframe-prompt-${mobile ? 'mobile' : 'desktop'}.png`, fullPage: true });
   await build(page);
+  await expect(page.locator('.user-message').first()).toContainText('An observatory on the moon');
+  await expect(page.locator('#prompt')).toHaveValue('');
+  await expect(page.locator('#reference-preview')).toBeHidden();
   expect(sceneRequests[0].messages[1].content[1].image_url.url).toMatch(/^data:image\/jpeg/);
   const panel = await page.locator('#studio-panel').boundingBox(); expect(panel.x).toBe(0); expect(panel.y).toBe(0); expect(panel.height).toBe(mobile ? 844 : 1000);
   await page.locator('#annotate').click(); await page.locator('#frame-note').fill('Warm light from the left. Keep the antenna.'); await page.locator('#close-notes').click();
@@ -39,10 +42,13 @@ for (const mobile of [false, true]) test(`prompt → studio → four annotated f
   await page.locator('#capture').click(); await expect(page.locator('#capture')).toBeDisabled(); await expect(page.locator('#shot-count')).toHaveText('4 / 4 frames');
   await page.getByRole('button', { name: 'Delete frame 4', exact: true }).click(); await expect(page.locator('#capture')).toBeEnabled(); await page.locator('#capture').click();
   await page.screenshot({ path: `/tmp/reframe-studio-${mobile ? 'mobile' : 'desktop'}.png` });
-  await page.locator('#exit-studio').click(); await page.locator('#prompt').fill('A completely different next scene'); await page.locator('#remove-reference').click(); await page.locator('#enter-studio').click();
+  await page.locator('#exit-studio').click(); await page.locator('#prompt').fill('A completely different next scene'); await upload(page); await page.locator('#remove-reference').click(); await page.locator('#enter-studio').click();
   await page.route('https://api.openai.com/v1/images/edits', async route => { renderBodies.push(route.request().postData()); await route.fulfill({ json: { data: [{ b64_json: first.split(',')[1] }] } }); });
   await page.getByRole('button', { name: 'Let’s Go', exact: true }).click();
   await expect(page.locator('#studio-panel')).toBeHidden(); await expect(page.getByAltText('AI photograph 4')).toBeVisible();
+  await expect(page.locator('.studio-submission img')).toHaveCount(4);
+  await expect(page.locator('.studio-submission')).toContainText('Warm light from the left. Keep the antenna.');
+  expect(await page.locator('#chat-thread > article, #chat-thread > section').evaluateAll(nodes => nodes.map(node => node.classList.contains('user-message') ? 'user' : 'assistant'))).toEqual(['user', 'assistant', 'user', 'assistant']);
   expect(renderBodies).toHaveLength(4);
   expect(renderBodies[0]).toContain('Warm light from the left. Keep the antenna.'); expect(renderBodies[1]).not.toContain('Warm light from the left. Keep the antenna.');
   for (const body of renderBodies) { expect(body).toContain('An observatory on the moon'); expect(body).not.toContain('A completely different next scene'); expect(body).toContain('reference.jpeg'); }
@@ -60,7 +66,53 @@ test('image-only input produces a scene card; empty input and provider failures 
   await page.goto('/'); await page.locator('#build').click(); await expect(page.locator('#error')).toContainText('add an image'); await expect(page.locator('#access-dialog')).toBeHidden();
   await upload(page); await page.locator('#build').click(); await enterKey(page);
   await expect(page.locator('#error')).toContainText('key was not accepted'); await expect(page.locator('#scene-card')).toBeHidden(); await expect(page.locator('#studio-panel')).toBeHidden();
+  await page.getByRole('button', { name: 'Use this message again' }).click();
   await page.locator('#build').click(); await expect(page.locator('#access-dialog')).toBeVisible(); await page.locator('#cancel-access').click(); await expect(page.locator('#error')).toHaveText('Generation cancelled.');
+});
+test('earlier studio cards and failed image replies keep their own context across chat turns', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('https://api.openai.com/v1/chat/completions', route => {
+    const prompt = route.request().postDataJSON().messages[1].content[0].text;
+    return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ ...scene, title: prompt }) } }] } });
+  });
+  await page.goto('/'); await page.locator('#prompt').fill('First scene'); await buildWithoutTitle();
+  await page.locator('#annotate').click(); await page.locator('#frame-note').fill('Keep the silver telescope.'); await page.locator('#close-notes').click();
+  await page.locator('#capture').click();
+  const image = await page.locator('.frame-image img').getAttribute('src');
+  let fail = true; const bodies = [];
+  await page.route('https://api.openai.com/v1/images/edits', route => {
+    bodies.push(route.request().postData());
+    return route.fulfill(fail ? { status: 429, json: { error: {} } } : { json: { data: [{ b64_json: image.split(',')[1] }] } });
+  });
+  await page.locator('#render').click(); await expect(page.locator('.retry-render')).toBeVisible();
+  await page.locator('#prompt').fill('Second scene'); await page.locator('#build').click();
+  await expect(page.locator('#card-title')).toHaveText('Second scene');
+  await expect(page.locator('.scene-card')).toHaveCount(2);
+  await page.locator('.open-studio').first().click();
+  await expect(page.locator('#scene-name')).toHaveText('First scene');
+  await expect(page.locator('#shot-count')).toHaveText('1 / 4 frames');
+  expect(await page.locator('.frame-image img').getAttribute('src')).toBe(image);
+  await page.locator('#exit-studio').click();
+  fail = false; await page.locator('.retry-render').click();
+  await expect(page.getByAltText('AI photograph 1')).toBeVisible();
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1]).toContain('First scene'); expect(bodies[1]).toContain('Keep the silver telescope.');
+  expect(bodies[1]).not.toContain('Second scene');
+  await page.locator('.open-studio').last().click();
+  await expect(page.locator('#scene-name')).toHaveText('Second scene');
+  await expect(page.locator('#shot-count')).toHaveText('0 / 4 frames');
+  await page.locator('#capture').click(); await page.locator('#render').click();
+  await expect(page.getByAltText('AI photograph 2')).toBeVisible();
+  await expect(page.locator('.results-message')).toHaveCount(2);
+  await expect(page.locator('.studio-submission')).toHaveCount(2);
+  await page.locator('#new-chat').click(); await page.locator('#cancel-new-chat').click();
+  await expect(page.locator('.scene-card')).toHaveCount(2);
+  await page.locator('#new-chat').click(); await page.locator('#confirm-new-chat').click();
+  await expect(page.locator('#chat-intro')).toBeVisible(); await expect(page.locator('#chat-thread')).toBeEmpty();
+  async function buildWithoutTitle() {
+    await page.locator('#build').click(); await enterKey(page);
+    await expect(page.locator('#card-title')).toHaveText('First scene'); await page.locator('#enter-studio').click();
+  }
 });
 test('partial image failure keeps completed images and retries only unfinished frames', async ({ page }) => {
   await page.route('https://api.openai.com/v1/chat/completions', route => route.fulfill({ json: { choices: [{ message: { content: JSON.stringify(scene) } }] } }));

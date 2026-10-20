@@ -1,13 +1,13 @@
 import './style.css';
-import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare } from 'lucide';
+import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
 import { createStudio } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
 import { setupChatGPT } from './chatgpt.js';
-const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare };
+const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
 const $ = selector => document.querySelector(selector);
 const iconify = () => createIcons({ icons });
 const hosted = import.meta.env.VITE_AI_MODE === 'chatgpt';
-let current = null, shots = [], resultShots = [], shotId = 0, reference = null, studio, busy = false;
+let current = null, shots = [], shotId = 0, reference = null, studio, busy = false, activeTurn = null, resultOrdinal = 0;
 let timer, accessCode = '', resolveCode, activeShot = null, notes = '', loggedIn = false;
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('show'); clearTimeout(timer); timer = setTimeout(() => $('#toast').classList.remove('show'), 3500); }
 function error(text = '') { $('#error').textContent = text; $('#error').hidden = !text; }
@@ -15,12 +15,59 @@ function message(e) { return e.name === 'TimeoutError' ? 'Generation timed out. 
 function setBusy(value, text = '') {
   busy = value;
   $('#build').disabled = value || !studio;
-  $('#enter-studio').disabled = value || !current;
+  document.querySelectorAll('.open-studio, .retry-render').forEach(button => { button.disabled = value; });
+  $('#new-chat').disabled = value;
   $('#status').textContent = text;
   $('#status').setAttribute('aria-busy', String(value));
-  $('#retry-render').disabled = value;
   updateShotControls();
 }
+function scrollChat() {
+  requestAnimationFrame(() => $('#chat-scroll').scrollTo({ top: $('#chat-scroll').scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }));
+}
+function appendMessage(node) {
+  $('#chat-intro').hidden = true; $('#chat-thread').append(node); scrollChat();
+}
+function userMessage(text, images = [], className = '') {
+  const node = document.createElement('article'); node.className = `chat-message user-message ${className}`; node.setAttribute('aria-label', 'Your message');
+  const bubble = document.createElement('div'); bubble.className = 'user-bubble';
+  if (images.length) {
+    const grid = document.createElement('div'); grid.className = `message-images${images.length === 1 ? ' single-image' : ''}`;
+    for (const [index, item] of images.entries()) {
+      const figure = document.createElement('figure'), image = document.createElement('img');
+      image.src = item.src; image.alt = item.alt; figure.append(image);
+      if (className === 'studio-submission') {
+        const caption = document.createElement('figcaption'); caption.textContent = `Frame ${index + 1}`; figure.append(caption);
+      }
+      if (item.note) { const note = document.createElement('p'); note.className = 'submitted-note'; note.textContent = item.note; figure.append(note); }
+      grid.append(figure);
+    }
+    bubble.append(grid);
+  }
+  if (text) { const copy = document.createElement('p'); copy.textContent = text; bubble.append(copy); }
+  node.append(bubble); appendMessage(node); return node;
+}
+function clearReference() {
+  referenceVersion++; reference = null; $('#reference').value = '';
+  $('#upload-icon').replaceChildren(); $('#upload-title').textContent = 'Reference photo';
+  $('#reference-preview').hidden = true; $('#remove-reference').hidden = true;
+}
+function resizeComposer() {
+  $('#prompt').style.height = 'auto'; $('#prompt').style.height = `${Math.min(144, $('#prompt').scrollHeight)}px`;
+}
+$('#prompt').addEventListener('input', resizeComposer);
+$('#prompt').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && matchMedia('(pointer: fine)').matches) {
+    event.preventDefault(); $('#brief-form').requestSubmit();
+  }
+});
+// Keep the floating composer above the on-screen keyboard on iOS.
+function syncViewport() {
+  if (!window.visualViewport) return;
+  document.documentElement.style.setProperty('--app-height', `${window.visualViewport.height}px`);
+  document.documentElement.style.setProperty('--app-top', `${window.visualViewport.offsetTop}px`);
+}
+window.visualViewport?.addEventListener('resize', syncViewport);
+window.visualViewport?.addEventListener('scroll', syncViewport); syncViewport();
 function updateShotControls() {
   $('#capture').disabled = busy || !current || shots.length >= 4;
   $('#render').disabled = busy || !shots.some(shot => !shot.photo);
@@ -28,14 +75,16 @@ function updateShotControls() {
   $('#studio-hint').textContent = !shots.length ? 'Capture a frame to get started.' : shots.length === 4 ? 'Four frames. Ready when you are.' : `${shots.length} frame${shots.length === 1 ? '' : 's'} ready. Add more or let’s go.`;
 }
 function closeStudio() {
+  if (activeTurn && !$('#studio-panel').hidden) { activeTurn.view = studio.capture(); activeTurn.shots = shots; }
   $('#studio-panel').hidden = true; $('#notes-panel').hidden = true;
   $('#toast').classList.remove('show');
   $('#app').inert = false; document.body.style.overflow = ''; studio?.setActive(false);
-  $('#enter-studio').focus({ preventScroll: true });
+  activeTurn?.button.focus({ preventScroll: true });
 }
 function accountChanged(signedIn) {
   $('#welcome').hidden = signedIn; $('#conversation').hidden = !signedIn;
-  $('#access-settings').textContent = signedIn ? 'Account' : 'Sign in';
+  $('#account-label').textContent = signedIn ? 'Account' : 'Sign in';
+  $('#access-settings').setAttribute('aria-label', signedIn ? 'Account' : 'Sign in');
   if (!signedIn && loggedIn) closeStudio();
   loggedIn = signedIn;
 }
@@ -99,11 +148,14 @@ $('#object-select').onchange = event => studio.selectObject(event.target.value =
 $('#object-height').oninput = event => studio.setHeight(Number(event.target.value));
 $('#undo-move').onclick = () => studio.undoMove();
 $('#reset').onclick = () => studio?.reset(); $('#ratio').onchange = () => studio?.resize();
-$('#enter-studio').onclick = () => {
-  if (!current || busy) return;
+function openStudio(turn) {
+  if (!turn || busy) return;
+  activeTurn = turn; current = { prompt: turn.prompt, reference: turn.reference }; shots = turn.shots;
+  studio.restore(turn.view); populateObjects(); mode(false); activeShot = null; notes = '';
+  $('#frame-note').value = ''; $('#note-label').textContent = 'Add note'; $('#scene-name').textContent = turn.title; updateShots();
   $('#studio-panel').hidden = false; $('#app').inert = true; document.body.style.overflow = 'hidden';
   studio.setActive(true); $('#exit-studio').focus({ preventScroll: true });
-};
+}
 $('#exit-studio').onclick = closeStudio;
 // Keep keyboard navigation inside the full-screen studio, including its note sheet.
 $('#studio-panel').addEventListener('keydown', event => {
@@ -124,24 +176,46 @@ const prompts = {
   jewellery: 'An emerald ring on black stone with a dramatic side light. Gold details and a quiet editorial composition.',
   industrial: 'An industrial smelting complex with tall chimneys, steel silos, gantries, and a loading yard.',
 };
-document.querySelectorAll('.preset').forEach(button => button.onclick = () => { $('#prompt').value = prompts[button.dataset.scene]; $('#prompt').focus(); });
+document.querySelectorAll('.preset').forEach(button => button.onclick = () => { $('#prompt').value = prompts[button.dataset.scene]; resizeComposer(); $('#prompt').focus(); });
 $('#brief-form').onsubmit = async event => {
   event.preventDefault(); if (busy || !studio) return;
   const typedPrompt = $('#prompt').value.trim();
   if (!typedPrompt && !reference) { error('Describe a scene, add an image, or both.'); return; }
   const prompt = typedPrompt || 'Create a photographic scene centered on the subject in this reference image.';
   const sceneReference = reference;
+  const sent = userMessage(typedPrompt, sceneReference ? [{ src: sceneReference, alt: 'Your reference photo' }] : []);
+  $('#prompt').value = ''; resizeComposer(); clearReference();
+  const pending = document.createElement('article'); pending.className = 'chat-message assistant-message thinking-message';
+  pending.innerHTML = '<span class="thinking-dot"></span><span>Setting the scene…</span>'; appendMessage(pending);
   error(); setBusy(true, 'Arranging your scene…');
   try {
     const data = await api('scene', { prompt, reference: sceneReference });
+    // Each response retains its own scene and frames when another message is sent.
+    if (activeTurn) activeTurn.shots = shots;
     studio.setScene(data.scene); current = { prompt, reference: sceneReference };
     shots = []; notes = ''; activeShot = null; $('#frame-note').value = ''; $('#note-label').textContent = 'Add note';
-    $('#retry-render').hidden = true;
-    $('#scene-name').textContent = data.scene.title; $('#card-title').textContent = data.scene.title;
-    $('#scene-preview').src = studio.capture().composition; $('#scene-card').hidden = false;
+    for (const id of ['scene-card', 'scene-preview', 'card-title', 'enter-studio']) document.getElementById(id)?.removeAttribute('id');
+    const node = $('#scene-template').content.firstElementChild.cloneNode(true), card = node.querySelector('.scene-card');
+    card.id = 'scene-card'; node.querySelector('.card-title').id = 'card-title'; node.querySelector('.scene-preview').id = 'scene-preview';
+    const button = node.querySelector('.open-studio'); button.id = 'enter-studio';
+    const view = studio.capture(); node.querySelector('.scene-preview').src = view.composition; node.querySelector('.card-title').textContent = data.scene.title;
+    activeTurn = { ...current, title: data.scene.title, view, shots, button };
+    const turn = activeTurn; button.onclick = () => openStudio(turn);
+    pending.replaceWith(node); iconify();
     populateObjects(); mode(false); updateShots();
-    $('#scene-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  } catch (e) { error(message(e)); } finally { setBusy(false); }
+    scrollChat();
+  } catch (e) {
+    pending.classList.add('message-failed'); pending.replaceChildren();
+    const copy = document.createElement('p'); copy.textContent = message(e);
+    const retry = document.createElement('button'); retry.className = 'quiet'; retry.textContent = 'Use this message again';
+    retry.onclick = () => {
+      if (busy) return;
+      $('#prompt').value = typedPrompt; resizeComposer();
+      if (sceneReference) showReference(sceneReference, 'Reference photo'); else clearReference();
+      $('#prompt').focus();
+    };
+    pending.append(copy, retry); sent.dataset.failed = 'true'; error(message(e)); scrollChat();
+  } finally { setBusy(false); }
 };
 function updateShots() {
   const container = $('#shots'); container.replaceChildren();
@@ -184,56 +258,74 @@ $('#capture').onclick = () => {
   updateShots(); $('#flash').classList.remove('fire'); void $('#flash').offsetWidth; $('#flash').classList.add('fire'); toast(`Frame ${shots.length} captured.`);
 };
 function preview(image) { $('#photo-preview').src = image; $('#photo-dialog').showModal(); }
-function updateResults() {
-  const grid = $('#result-grid'); grid.replaceChildren();
-  for (const [index, shot] of resultShots.entries()) {
+function updateResults(batch) {
+  const grid = batch.node.querySelector('.result-grid'); grid.replaceChildren();
+  for (const shot of batch.shots) {
     const card = document.createElement('article'); card.className = 'result-card';
     if (shot.photo) {
-      const view = document.createElement('button'); view.setAttribute('aria-label', `View photograph ${index + 1}`);
-      const image = document.createElement('img'); image.className = 'result-image'; image.src = shot.photo; image.alt = `AI photograph ${index + 1}`; view.append(image); view.onclick = () => preview(shot.photo); card.append(view);
+      const view = document.createElement('button'); view.setAttribute('aria-label', `View photograph ${shot.ordinal}`);
+      const image = document.createElement('img'); image.className = 'result-image'; image.src = shot.photo; image.alt = `AI photograph ${shot.ordinal}`;
+      view.append(image); view.onclick = () => preview(shot.photo); card.append(view);
     } else {
-      const pending = document.createElement('div'); pending.className = 'result-pending'; pending.textContent = shot.generating ? 'Making your image…' : shot.failed ? 'Not generated yet' : 'Waiting for your image'; card.append(pending);
+      const pending = document.createElement('div'); pending.className = `result-pending${shot.generating ? ' generating' : ''}`;
+      pending.innerHTML = '<i data-lucide="aperture"></i>';
+      const label = document.createElement('span'); label.textContent = shot.generating ? 'Bringing it to life…' : shot.failed ? 'Ready to try again' : 'Up next'; pending.append(label); card.append(pending);
     }
-    const caption = document.createElement('div'); caption.className = 'result-caption'; const label = document.createElement('span'); label.textContent = `Frame ${shot.frame}`; caption.append(label);
+    const caption = document.createElement('div'); caption.className = 'result-caption';
+    const label = document.createElement('span'); label.textContent = `Frame ${shot.frame}`; caption.append(label);
     if (shot.photo) {
-      const link = document.createElement('a'); link.href = shot.photo; link.download = `reframe-photo-${shot.id}.${shot.photo.startsWith('data:image/png') ? 'png' : 'jpg'}`; link.innerHTML = '<i data-lucide="download"></i> Save'; link.setAttribute('aria-label', `Download photograph ${index + 1}`); caption.append(link);
+      const link = document.createElement('a'); link.href = shot.photo;
+      link.download = `reframe-photo-${shot.id}.${shot.photo.startsWith('data:image/png') ? 'png' : 'jpg'}`;
+      link.innerHTML = '<i data-lucide="download"></i> Save'; link.setAttribute('aria-label', `Download photograph ${shot.ordinal}`); caption.append(link);
     }
-    card.append(caption);
-    if (shot.notes) { const note = document.createElement('p'); note.className = 'result-note'; note.textContent = shot.notes; card.append(note); }
-    grid.append(card);
+    card.append(caption); grid.append(card);
   }
+  batch.node.querySelector('.result-disclaimer').hidden = !batch.shots.some(shot => shot.photo);
   iconify();
 }
-async function renderFrames() {
+async function renderFrames(existingBatch = null) {
   if (busy) return;
-  const pending = shots.filter(shot => !shot.photo); if (!pending.length) return;
-  closeStudio(); error(); setBusy(true, 'Turning your frames into images…');
-  $('#results').hidden = false; $('#retry-render').hidden = true; $('#results-title').textContent = 'Making your images…';
-  for (const shot of pending) {
-    if (!resultShots.some(result => result.id === shot.id)) resultShots.push({ ...structuredClone(shot), frame: shots.indexOf(shot) + 1 });
-    else { const result = resultShots.find(result => result.id === shot.id); result.notes = shot.notes; }
+  let batch = existingBatch;
+  if (!batch) {
+    const pending = shots.filter(shot => !shot.photo); if (!pending.length) return;
+    closeStudio();
+    userMessage(`Make ${pending.length === 1 ? 'this shot' : `these ${pending.length} shots`} real.`, pending.map(shot => ({ src: shot.composition, alt: `Submitted frame ${shots.indexOf(shot) + 1}`, note: shot.notes })), 'studio-submission');
+    for (const id of ['results', 'results-title', 'results-status', 'result-grid', 'retry-render']) document.getElementById(id)?.removeAttribute('id');
+    const node = $('#results-template').content.firstElementChild.cloneNode(true); node.id = 'results';
+    for (const name of ['results-title', 'results-status', 'result-grid', 'retry-render']) node.querySelector(`.${name}`).id = name;
+    batch = { node, shots: pending.map(shot => ({ ...structuredClone(shot), frame: shots.indexOf(shot) + 1, ordinal: ++resultOrdinal, source: shot })) };
+    node.querySelector('.retry-render').onclick = () => renderFrames(batch); appendMessage(node);
   }
-  updateResults(); $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  let completed = 0;
+  const pending = batch.shots.filter(shot => !shot.photo); if (!pending.length) return;
+  const title = batch.node.querySelector('.results-title'), status = batch.node.querySelector('.results-status'), retry = batch.node.querySelector('.retry-render');
+  error(); setBusy(true, 'Creating your images…'); retry.hidden = true; title.textContent = 'Bringing your frames to life…';
+  updateResults(batch); scrollChat();
   try {
-    for (const shot of pending) {
-      const resultShot = resultShots.find(result => result.id === shot.id); resultShot.generating = true; resultShot.failed = false; updateResults();
-      $('#results-status').textContent = `Image ${completed + 1} of ${pending.length}. Good things take a moment.`;
+    for (const [index, shot] of pending.entries()) {
+      shot.generating = true; shot.failed = false; updateResults(batch);
+      status.textContent = `Creating image ${index + 1} of ${pending.length} from your composition.`;
       const result = await api('render', { prompt: shot.prompt, reference: shot.reference, composition: shot.composition, ratio: shot.ratio, notes: shot.notes });
       if (typeof result.image !== 'string' || !/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/]+=*$/.test(result.image)) throw new Error('The AI service returned an invalid image.');
-      shot.photo = result.image; resultShot.photo = result.image; resultShot.generating = false; completed++; updateResults();
+      shot.photo = result.image; shot.source.photo = result.image; shot.generating = false; updateResults(batch);
     }
-    $('#results-title').textContent = 'Your images, from your angles.'; $('#results-status').textContent = 'Save your favourites before leaving.';
+    title.textContent = batch.shots.length === 1 ? 'Your shot, brought to life.' : 'Your shots, brought to life.';
+    status.textContent = 'Framed by you. Made with AI.';
   } catch (e) {
-    resultShots.filter(shot => !shot.photo).forEach(shot => { shot.failed = true; });
-    error(message(e)); $('#results-title').textContent = completed ? 'Your finished images are safe.' : 'Let’s give that another try.';
-    $('#results-status').textContent = message(e); $('#retry-render').hidden = false;
+    batch.shots.filter(shot => !shot.photo).forEach(shot => { shot.failed = true; });
+    error(message(e)); title.textContent = batch.shots.some(shot => shot.photo) ? 'Your finished images are here.' : 'That didn’t quite work.';
+    status.textContent = message(e); retry.hidden = false;
   } finally {
-    resultShots.forEach(shot => { shot.generating = false; }); setBusy(false); updateShots(); updateResults();
+    batch.shots.forEach(shot => { shot.generating = false; }); setBusy(false); updateShots(); updateResults(batch);
   }
 }
-$('#render').onclick = renderFrames; $('#retry-render').onclick = renderFrames;
+$('#render').onclick = () => renderFrames();
 let referenceVersion = 0;
+function showReference(data, name) {
+  referenceVersion++; reference = data;
+  const image = document.createElement('img'); image.src = data; image.alt = 'Your reference';
+  $('#upload-icon').replaceChildren(image); $('#upload-title').textContent = name;
+  $('#reference-preview').hidden = false; $('#remove-reference').hidden = false; error();
+}
 async function handleFile(file) {
   if (!file) return;
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) { error('Choose a JPG, PNG, or WEBP image smaller than 10 MB.'); return; }
@@ -243,12 +335,24 @@ async function handleFile(file) {
     const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
     const context = canvas.getContext('2d'); context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
     if (version !== referenceVersion) return;
-    reference = canvas.toDataURL('image/jpeg', .85); const image = document.createElement('img'); image.src = reference; image.alt = 'Your reference'; $('#upload-icon').replaceChildren(image);
-    $('#upload-title').textContent = file.name; $('#remove-reference').hidden = false; error();
+    showReference(canvas.toDataURL('image/jpeg', .85), file.name);
   } catch { error('This image could not be read. Please try another.'); }
 }
 $('#reference').onchange = event => handleFile(event.target.files[0]);
 $('.composer').ondragover = event => event.preventDefault(); $('.composer').ondrop = event => { event.preventDefault(); handleFile(event.dataTransfer.files[0]); };
-$('#remove-reference').onclick = () => { referenceVersion++; reference = null; $('#reference').value = ''; $('#upload-icon').innerHTML = '<i data-lucide="image-plus"></i>'; $('#upload-title').textContent = 'Add image'; $('#remove-reference').hidden = true; iconify(); };
+$('#remove-reference').onclick = clearReference;
+function resetChat() {
+  if (busy) return;
+  closeStudio(); current = null; activeTurn = null; shots = []; shotId = 0; resultOrdinal = 0; activeShot = null; notes = '';
+  $('#chat-thread').replaceChildren(); $('#chat-intro').hidden = false;
+  $('#prompt').value = ''; resizeComposer(); clearReference(); error(); updateShots(); setBusy(false);
+  $('#new-chat-dialog').close(); $('#prompt').focus();
+}
+$('#new-chat').onclick = () => {
+  if (busy) return;
+  if ($('#chat-thread').childElementCount) $('#new-chat-dialog').showModal(); else $('#prompt').focus();
+};
+$('#cancel-new-chat').onclick = () => $('#new-chat-dialog').close();
+$('#confirm-new-chat').onclick = resetChat;
 $('#help').onclick = () => $('#help-dialog').showModal(); $('#close-help').onclick = () => $('#help-dialog').close(); $('#close-photo').onclick = () => $('#photo-dialog').close();
 updateShots(); setBusy(false); iconify();

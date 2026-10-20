@@ -1,6 +1,6 @@
 # Reframe
 
-A mobile-first 3D camera for AI image generation. Start with a description, a reference image, or both. OpenAI generates a low-poly scene; a response card opens the full-screen Three.js studio. Frame up to four shots while seated, add visual direction, and generate photographs guided by those compositions.
+A mobile-first chat and 3D camera for AI image generation. Send a description, a reference image, or both from the floating composer. Reframe replies with an **Open Studio** card. Frame up to four shots in the full-screen Three.js studio, add visual direction, and send the captured compositions back as a user message. Generated photographs arrive as the next assistant reply.
 
 ## Deploy on Render
 
@@ -11,11 +11,13 @@ The repository includes a `render.yaml` Blueprint for one **free** Docker web se
 On the Render app:
 
 1. Select **Continue with ChatGPT**. Open the OpenAI sign-in link, enter the displayed code, and return to Reframe. OpenAI may require enabling device code sign-in in ChatGPT security settings. This is device-code authentication, not a Google-style OAuth redirect.
-2. Type a scene, add an image, or both, then **Create scene**.
-3. Select **Enter Studio** on the response card. The studio fills the browser viewport on phones and desktops.
+2. Type a scene, add an image with **+**, or both, then use the up-arrow **Send message** button.
+3. Select **Open Studio** on the response card. The studio fills the browser viewport on phones and desktops.
 4. Orbit, zoom and pan. **Move objects** lets you tap and drag individual shapes across the ground, adjust their height, and undo movement.
 5. Add an optional text note and capture up to **four frames**. Each frame snapshots the edited geometry, camera, reference, and note. Restoring a draft frame lets you edit its note; subsequent scene edits do not mutate its captured composition.
-6. Select **Let’s Go**. Photographs appear on the main screen with individual **Save** links. If a batch fails partway through, completed images remain available and retry generates only unfinished frames.
+6. Select **Let’s Go**. The captured frames and notes appear as your next chat message, followed by an assistant image reply with individual **Save** links. If a batch fails partway through, completed images remain available and retry generates only unfinished frames.
+
+Earlier studio cards retain their scenes and captured frames during this tab session. Image retries retain the submitted prompt, reference, compositions and notes even after another scene is created. The top-left **New chat** button asks before clearing the conversation; download images before starting over or reloading. The interface uses translucent surfaces, a bottom composer and responsive chat cards; physical iOS keyboard behavior still needs a device trial.
 
 This integration uses the official Codex app-server (`@openai/codex` pinned to `0.163.0`) and its `chatgptDeviceCode` login, structured scene output, and image-generation tool. A ChatGPT account with appropriate Codex/image access and remaining usage is required. **Live sign-in and image generation still need an end-to-end account test; protocol and fixture tests do not verify account entitlement.** There is no simulated production output.
 
@@ -38,9 +40,9 @@ The health endpoint is `/api/health`. In a managed environment, follow its Docke
 
 Pages remains a static, API-key version. It cannot run the ChatGPT sign-in backend. Its usage is:
 
-1. Describe the scene, add a reference, or both, then select **Create scene**.
+1. Describe the scene, add a reference, or both, then use **Send message**.
 2. Enter your own OpenAI API key. It is kept only in JavaScript memory, never bundled, persisted, or sent to a Reframe server. Reload or **Account → Forget key** clears it.
-3. Select **Enter Studio**, frame up to four shots and add optional notes.
+3. Select **Open Studio**, frame up to four shots and add optional notes.
 4. Choose **Let’s Go**, then view and save the generated photographs.
 
 Generation is billed to the user's OpenAI API account. Scene generation uses `gpt-4.1-mini`; image editing uses `gpt-image-1` with high input fidelity. The account needs API credit and access to those models (image generation may require organization verification). Product references and composition images are sent directly to OpenAI over HTTPS, only on generation. There are no preset scene fallbacks or fake generated images. The scene chips only fill the prompt.
@@ -75,7 +77,7 @@ npm run test:hosted
 npm run build
 ```
 
-Unit tests check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, response cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, and partial-failure recovery. These fixtures are not bundled into the app. Live provider checks require an authorized account.
+Unit tests check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
 
 Playwright uses `/usr/bin/chromium` by default; set `CHROMIUM_PATH` if needed. Tests start Vite automatically. Physical multitouch ergonomics still need a device trial.
 
