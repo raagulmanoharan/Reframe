@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: reframe
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "3000"

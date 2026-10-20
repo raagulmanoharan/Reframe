@@ -8,14 +8,17 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "playwright test",
-    "test:unit": "node --test test/*.test.js"
+    "test:unit": "node --test test/*.test.js",
+    "test:hosted": "playwright test --config playwright.hosted.config.js",
+    "start": "node server/index.js"
   },
   "dependencies": {
-    "three": "^0.180.0",
-    "lucide": "^0.468.0"
+    "@openai/codex": "0.163.0",
+    "lucide": "^0.468.0",
+    "three": "^0.180.0"
   },
   "devDependencies": {
-    "vite": "^7.1.0",
-    "@playwright/test": "^1.56.0"
+    "@playwright/test": "^1.56.0",
+    "vite": "^7.1.0"
   }
 }

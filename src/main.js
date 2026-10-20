@@ -2,12 +2,15 @@ import './style.css';
 import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, RotateCcw, Download, Sparkles, X, KeyRound } from 'lucide';
 import { createStudio } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
+import { setupChatGPT } from './chatgpt.js';
 const icons = { CircleHelp, ImagePlus, ArrowUpRight, RotateCcw, Download, Sparkles, X, KeyRound };
 const $ = selector => document.querySelector(selector);
 const iconify = () => createIcons({ icons });
 let timer, current = null, shots = [], shotId = 0, reference = null, studio, busy = false;
 // User-supplied key stays in this tab's memory. Never persist or bundle it.
 let accessCode = '';
+const hosted = import.meta.env.VITE_AI_MODE === 'chatgpt';
+const chatgpt = hosted ? setupChatGPT() : null;
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('show'); clearTimeout(timer); timer = setTimeout(() => $('#toast').classList.remove('show'), 4500); }
 function error(message = '') { $('#error').textContent = message; $('#error').hidden = !message; }
 function setBusy(value, text) {
@@ -25,6 +28,7 @@ function getCode() {
   $('#access-dialog').showModal();
   return new Promise(resolve => { resolveCode = resolve; });
 }
+if (!hosted) {
 $('#access-form').onsubmit = event => {
   event.preventDefault(); accessCode = $('#access-code').value.trim();
   if (!accessCode) return;
@@ -35,7 +39,9 @@ $('#access-dialog').addEventListener('close', () => { if (resolveCode) { resolve
 $('#cancel-access').onclick = () => $('#access-dialog').close();
 $('#access-settings').onclick = () => { $('#access-dialog').showModal(); };
 $('#forget-key').onclick = () => { accessCode = ''; $('#access-code').value = ''; $('#access-dialog').close(); toast('API key removed from this tab.'); };
+}
 async function api(path, payload) {
+  if (chatgpt) return chatgpt(path, payload);
   const code = await getCode();
   if (!code) throw new Error('Generation cancelled.');
   try { return await (path === 'scene' ? generateScene(code, payload) : generatePhoto(code, payload)); }
@@ -124,7 +130,7 @@ $('#render').onclick = async () => {
 $('#generate').onclick = () => {
   for (const shot of shots.filter(s => s.selected)) {
     const a = document.createElement('a'); a.href = shot.photo || shot.composition;
-    a.download = `reframe-${shot.photo ? 'photo' : 'composition'}-${shot.id}.jpg`; a.click();
+    a.download = `reframe-${shot.photo ? 'photo' : 'composition'}-${shot.id}.${shot.photo?.startsWith('data:image/png') ? 'png' : 'jpg'}`; a.click();
   }
 };
 let referenceVersion = 0;
@@ -148,3 +154,4 @@ $('.upload').ondragover = e => e.preventDefault(); $('.upload').ondrop = e => { 
 $('#remove-reference').onclick = () => { referenceVersion++; reference = null; $('#reference').value = ''; $('#upload-icon').innerHTML = '<i data-lucide="image-plus"></i>'; $('#upload-title').textContent = 'Add reference'; $('#remove-reference').hidden = true; iconify(); };
 $('#help').onclick = () => $('#help-dialog').showModal(); $('#close-help').onclick = () => $('#help-dialog').close(); $('#close-photo').onclick = () => $('#photo-dialog').close();
 iconify(); setBusy(false);
+if (hosted) $('#privacy-note').textContent = 'Prompts, references and captures pass through Reframe to OpenAI when you generate. Sign-in lasts for this session; it clears when you sign out or the server restarts. Download photos before leaving.';
