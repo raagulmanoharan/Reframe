@@ -11,14 +11,14 @@
   <div id="app">
     <header>
       <a class="brand" href="./">reframe<span>✳</span></a>
-      <button id="help" class="icon-button" aria-label="How to use Reframe"><i data-lucide="circle-help"></i></button>
+      <div class="header-actions"><button id="access-settings" class="icon-button" aria-label="AI settings"><i data-lucide="key-round"></i></button><button id="help" class="icon-button" aria-label="How to use Reframe"><i data-lucide="circle-help"></i></button></div>
     </header>
     <main>
       <section class="brief" aria-label="Describe your scene">
         <h1>Find your angle.</h1>
         <p class="intro">A scene. Your perspective.</p>
         <label class="sr-only" for="prompt">Describe your scene</label>
-        <textarea id="prompt" rows="2" placeholder="What do you want to shoot?">A sofa in a warm, sunlit living room.</textarea>
+        <textarea id="prompt" maxlength="4000" rows="2" placeholder="What do you want to shoot?">A sofa in a warm, sunlit living room.</textarea>
         <div class="presets" aria-label="Try a scene">
           <button class="preset active" data-scene="living">Living room</button>
           <button class="preset" data-scene="jewellery">Jewellery</button>
@@ -26,23 +26,24 @@
         </div>
         <div class="brief-actions">
           <label class="upload" for="reference"><span id="upload-icon"><i data-lucide="image-plus"></i></span><span id="upload-title">Add reference</span><input id="reference" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <button id="remove-reference" class="icon-button" aria-label="Remove reference" hidden>×</button>
           <button id="build" class="primary">Create scene <i data-lucide="arrow-up-right"></i></button>
         </div>
-        <p class="prototype-note">Demo: three sample scenes. AI generation comes next.</p>
+        <p id="status" class="prototype-note" role="status">Describe a scene to begin.</p><p id="error" role="alert" hidden></p>
       </section>
       <section class="workspace" aria-label="Camera and saved shots">
         <div id="viewport">
           <div id="canvas-wrap"></div>
-          <div class="view-top"><span id="scene-name">SUNLIT LIVING ROOM</span><button id="reset" class="glass" aria-label="Reset camera"><i data-lucide="rotate-ccw"></i> Reset</button></div>
+          <div class="view-top"><span id="scene-name">YOUR NEXT SCENE</span><button id="reset" class="glass" aria-label="Reset camera"><i data-lucide="rotate-ccw"></i> Reset</button></div>
           <div id="webgl-error" hidden>3D preview needs WebGL. Open this page in a browser with hardware acceleration.</div>
-          <div id="flash"></div>
+          <div id="scene-empty"><i data-lucide="sparkles"></i><span>Your imagination goes here.</span><small>Describe it, then create your scene.</small></div><div id="flash"></div>
         </div>
         <div class="camera-bar">
           <p class="gesture">Drag to orbit<span>Pinch to zoom · Two fingers to pan</span></p>
-          <button id="capture" aria-label="Capture shot"><span></span></button>
+          <button id="capture" disabled aria-label="Capture shot"><span></span></button>
           <label class="select-wrap"><span class="sr-only">Shot aspect ratio</span><select id="ratio" aria-label="Shot aspect ratio"><option value="4:3">4:3</option><option value="1:1">1:1</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select></label>
         </div>
-        <div class="shots-heading"><h2>Your shots <span id="shot-count">0 shots</span></h2><button id="generate" disabled>Download <i data-lucide="download"></i></button></div>
+        <div class="shots-heading"><h2>Your shots <span id="shot-count">0 shots</span></h2><div class="shot-actions"><button id="render" disabled>Generate photos <i data-lucide="sparkles"></i></button><button id="generate" disabled aria-label="Download selected shots"><i data-lucide="download"></i></button></div></div>
         <div id="shots"><div class="empty-shot">Find a view you like. Tap the shutter.</div></div>
       </section>
     </main>
@@ -50,10 +51,12 @@
     <dialog id="help-dialog">
       <button id="close-help" class="icon-button" aria-label="Close help">×</button>
       <h2>Your own little photo studio.</h2>
-      <p>Choose a scene. Drag to move around it. Pinch or scroll to get closer. Use two fingers or right-drag to pan.</p>
-      <p>Tap the shutter to keep a shot. Tap its thumbnail to revisit that angle. Download saves your selected shots as PNGs.</p>
-      <p>This demo creates three sample scenes from keywords. References are kept on your device for visual guidance; they do not change the 3D model. AI scene creation and final photo generation are not connected yet. Shots clear when you reload.</p>
+      <p>Describe any scene and optionally add a product reference. AI turns it into a rough 3D composition. Drag to orbit, pinch or scroll to move closer, and use two fingers or right-drag to pan.</p>
+      <p>Capture your favourite angles, then select Generate photos. Each selected composition and its reference are sent to the AI image model. Tap a finished photo to view it. Download saves your selected photos or composition drafts.</p>
+      <p>AI approximates the reference in 3D; it is not an exact reconstruction. Review final images for product accuracy. Images use the model’s supported output sizes, so aspect ratios may vary slightly. Shots clear when you reload.</p><p>Prompts, references, and captures are sent directly to OpenAI when you generate. Your API key stays in tab memory and is cleared on reload. This app has no backend and does not store your images or key.</p>
     </dialog>
+    <dialog id="access-dialog"><form id="access-form"><h2>Connect OpenAI</h2><p>Use your own OpenAI API key. It stays in this tab’s memory and is sent only to OpenAI. Generation is billed to your OpenAI account.</p><label for="access-code">OpenAI API key</label><input id="access-code" type="password" autocomplete="off" spellcheck="false" required><div class="dialog-actions"><button type="button" id="forget-key">Forget key</button><button type="button" id="cancel-access">Cancel</button><button class="primary" type="submit">Continue</button></div></form></dialog>
+    <dialog id="photo-dialog"><button id="close-photo" class="icon-button" aria-label="Close photo">×</button><img id="photo-preview" alt="Generated photograph"></dialog>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
