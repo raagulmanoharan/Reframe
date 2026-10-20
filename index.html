@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f8f7f4">
+  <meta name="description" content="Describe a scene. Find your angle. Capture it. A simple 3D composition playground.">
+  <title>Reframe — Find your angle</title>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <a class="brand" href="./">reframe<span>✳</span></a>
+      <button id="help" class="icon-button" aria-label="How to use Reframe"><i data-lucide="circle-help"></i></button>
+    </header>
+    <main>
+      <section class="brief" aria-label="Describe your scene">
+        <h1>Find your angle.</h1>
+        <p class="intro">A scene. Your perspective.</p>
+        <label class="sr-only" for="prompt">Describe your scene</label>
+        <textarea id="prompt" rows="2" placeholder="What do you want to shoot?">A sofa in a warm, sunlit living room.</textarea>
+        <div class="presets" aria-label="Try a scene">
+          <button class="preset active" data-scene="living">Living room</button>
+          <button class="preset" data-scene="jewellery">Jewellery</button>
+          <button class="preset" data-scene="industrial">Industrial</button>
+        </div>
+        <div class="brief-actions">
+          <label class="upload" for="reference"><span id="upload-icon"><i data-lucide="image-plus"></i></span><span id="upload-title">Add reference</span><input id="reference" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <button id="build" class="primary">Create scene <i data-lucide="arrow-up-right"></i></button>
+        </div>
+        <p class="prototype-note">Demo: three sample scenes. AI generation comes next.</p>
+      </section>
+      <section class="workspace" aria-label="Camera and saved shots">
+        <div id="viewport">
+          <div id="canvas-wrap"></div>
+          <div class="view-top"><span id="scene-name">SUNLIT LIVING ROOM</span><button id="reset" class="glass" aria-label="Reset camera"><i data-lucide="rotate-ccw"></i> Reset</button></div>
+          <div id="webgl-error" hidden>3D preview needs WebGL. Open this page in a browser with hardware acceleration.</div>
+          <div id="flash"></div>
+        </div>
+        <div class="camera-bar">
+          <p class="gesture">Drag to orbit<span>Pinch to zoom · Two fingers to pan</span></p>
+          <button id="capture" aria-label="Capture shot"><span></span></button>
+          <label class="select-wrap"><span class="sr-only">Shot aspect ratio</span><select id="ratio" aria-label="Shot aspect ratio"><option value="4:3">4:3</option><option value="1:1">1:1</option><option value="9:16">9:16</option><option value="16:9">16:9</option></select></label>
+        </div>
+        <div class="shots-heading"><h2>Your shots <span id="shot-count">0 shots</span></h2><button id="generate" disabled>Download <i data-lucide="download"></i></button></div>
+        <div id="shots"><div class="empty-shot">Find a view you like. Tap the shutter.</div></div>
+      </section>
+    </main>
+    <div id="toast" role="status"></div>
+    <dialog id="help-dialog">
+      <button id="close-help" class="icon-button" aria-label="Close help">×</button>
+      <h2>Your own little photo studio.</h2>
+      <p>Choose a scene. Drag to move around it. Pinch or scroll to get closer. Use two fingers or right-drag to pan.</p>
+      <p>Tap the shutter to keep a shot. Tap its thumbnail to revisit that angle. Download saves your selected shots as PNGs.</p>
+      <p>This demo creates three sample scenes from keywords. References are kept on your device for visual guidance; they do not change the 3D model. AI scene creation and final photo generation are not connected yet. Shots clear when you reload.</p>
+    </dialog>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

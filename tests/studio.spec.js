@@ -1,0 +1,28 @@
+import { test, expect } from '@playwright/test';
+for(const mobile of [false,true])test(`studio workflow ${mobile?'mobile':'desktop'}`,async({page})=>{
+ await page.setViewportSize(mobile?{width:390,height:844}:{width:1440,height:1050});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/');await expect(page.locator('canvas')).toBeVisible();
+ await expect(page.locator('#webgl-error')).toBeHidden();
+ await page.getByRole('button',{name:'Capture shot',exact:true}).click();
+ await expect(page.locator('#shot-count')).toHaveText('1 shot');
+ const first=await page.locator('.shot-image img').getAttribute('src');expect(first.length).toBeGreaterThan(10000);
+ const canvas=page.locator('canvas');const bounds=await canvas.boundingBox();await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);await page.mouse.down();await page.mouse.move(bounds.x+bounds.width/2+70,bounds.y+bounds.height/2+20,{steps:12});await page.mouse.up();await page.waitForTimeout(500);await page.locator('#capture').click();expect(await page.locator('.shot-image img').last().getAttribute('src')).not.toEqual(first);await page.getByRole('button',{name:'Delete shot 2',exact:true}).click();
+ await page.getByRole('button',{name:'Jewellery',exact:true}).click();
+ await expect(page.locator('#scene-name')).toHaveText('JEWELLERY STUDY');
+ await page.getByRole('button',{name:'Capture shot',exact:true}).click();
+ expect(await page.locator('.shot-image img').nth(1).getAttribute('src')).not.toEqual(first);
+ await page.getByRole('button',{name:'Restore shot 1',exact:true}).click();
+ await expect(page.locator('#scene-name')).toHaveText('SUNLIT LIVING ROOM');
+ await page.locator('#prompt').fill('A smelting factory with silos');await page.locator('#build').click();
+ await expect(page.locator('#scene-name')).toHaveText('INDUSTRIAL LANDSCAPE');
+ await page.locator('#ratio').selectOption('9:16');await page.locator('#capture').click();
+ const dimensions=await page.locator('.shot-image img').last().evaluate(img=>({w:img.naturalWidth,h:img.naturalHeight}));expect(dimensions.w/dimensions.h).toBeCloseTo(9/16,2);
+ await page.getByRole('checkbox',{name:'Select shot 3',exact:true}).uncheck();await page.getByRole('checkbox',{name:'Select shot 4',exact:true}).uncheck();
+ const download=page.waitForEvent('download');await page.locator('#generate').click();expect((await download).suggestedFilename()).toBe('reframe-shot-1.png');
+ await page.getByRole('button',{name:'Delete shot 1',exact:true}).click();await expect(page.locator('#generate')).toBeDisabled();
+ await page.locator('#reference').setInputFiles({name:'reference.png',mimeType:'image/png',buffer:Buffer.from(first.split(',')[1],'base64')});await expect(page.locator('#upload-title')).toHaveText('reference.png');
+ await page.locator('#help').click();await expect(page.locator('dialog')).toBeVisible();await page.locator('#close-help').click();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);
+ await page.screenshot({path:`/tmp/reframe-${mobile?'mobile':'desktop'}.png`,fullPage:true});
+});
