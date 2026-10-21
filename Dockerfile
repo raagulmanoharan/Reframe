@@ -11,7 +11,8 @@ RUN --mount=type=secret,id=proxy_ca \
 COPY index.html vite.config.js ./
 COPY src ./src
 COPY lib ./lib
-RUN VITE_AI_MODE=chatgpt npm run build
+ARG VITE_AI_MODE=openrouter
+RUN VITE_AI_MODE=$VITE_AI_MODE npm run build
 RUN npm prune --omit=dev --ignore-scripts --offline
 
 FROM node:22-bookworm-slim

@@ -2,11 +2,15 @@ import './style.css';
 import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
 import { createStudio } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
+import * as openrouter from './openrouter.js';
 import { setupChatGPT } from './chatgpt.js';
 const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
 const $ = selector => document.querySelector(selector);
 const iconify = () => createIcons({ icons });
-const hosted = import.meta.env.VITE_AI_MODE === 'chatgpt';
+const aiMode = import.meta.env.VITE_AI_MODE || 'openrouter';
+const hosted = aiMode === 'chatgpt';
+const useOpenRouter = aiMode === 'openrouter';
+let freePhotoAvailable = null;
 let current = null, shots = [], shotId = 0, reference = null, studio, busy = false, activeTurn = null, resultOrdinal = 0;
 let timer, accessCode = '', resolveCode, activeShot = null, notes = '', loggedIn = false;
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('show'); clearTimeout(timer); timer = setTimeout(() => $('#toast').classList.remove('show'), 3500); }
@@ -70,9 +74,22 @@ window.visualViewport?.addEventListener('resize', syncViewport);
 window.visualViewport?.addEventListener('scroll', syncViewport); syncViewport();
 function updateShotControls() {
   $('#capture').disabled = busy || !current || shots.length >= 4;
-  $('#render').disabled = busy || !shots.some(shot => !shot.photo);
+  $('#render').disabled = busy || freePhotoAvailable === false || !shots.some(shot => !shot.photo);
   $('#shot-count').textContent = `${shots.length} / 4 frames`;
-  $('#studio-hint').textContent = !shots.length ? 'Capture a frame to get started.' : shots.length === 4 ? 'Four frames. Ready when you are.' : `${shots.length} frame${shots.length === 1 ? '' : 's'} ready. Add more or let’s go.`;
+  $('#studio-hint').textContent = freePhotoAvailable === false ? 'Free photo generation is unavailable. Check Account for updates.' : !shots.length ? 'Capture a frame to get started.' : shots.length === 4 ? 'Four frames. Ready when you are.' : `${shots.length} frame${shots.length === 1 ? '' : 's'} ready. Add more or let’s go.`;
+}
+async function refreshFreeAvailability() {
+  if (!useOpenRouter) return;
+  $('#refresh-models').disabled = true;
+  try {
+    const available = await openrouter.getAvailability(); freePhotoAvailable = Boolean(available.photo);
+    const notice = !available.scene ? 'No free scene model is available right now. Check again in Account.' : !available.photo ? 'Free 3D scenes are available. Final photos are unavailable until OpenRouter offers a compatible free image model.' : '';
+    $('#provider-notice').textContent = notice; $('#provider-notice').hidden = !notice;
+    $('#provider-availability').textContent = `Scene: ${available.scene || 'unavailable'}. Photo: ${available.photo || 'no compatible free model'}.`;
+  } catch (e) {
+    freePhotoAvailable = null; $('#provider-availability').textContent = message(e);
+    $('#provider-notice').textContent = 'Free-model availability could not be checked. Open Account to try again.'; $('#provider-notice').hidden = false;
+  } finally { $('#refresh-models').disabled = false; updateShotControls(); }
 }
 function closeStudio() {
   if (activeTurn && !$('#studio-panel').hidden) { activeTurn.view = studio.capture(); activeTurn.shots = shots; }
@@ -101,6 +118,14 @@ if (hosted) {
   $('#privacy-note').textContent = 'Prompts, images and notes pass through Reframe to OpenAI. ChatGPT sign-in uses a device code and lasts for this session. Download images before reloading. Your plan’s access and usage limits apply.';
 } else {
   $('#conversation').hidden = false;
+  if (useOpenRouter) {
+    $('#access-form h2').textContent = 'Connect OpenRouter';
+    $('#access-form > p').textContent = 'Use an OpenRouter API key. Reframe selects only free model variants and never falls back to a paid model. Free models have usage limits and may be unavailable. Your key stays in this tab.';
+    $('#access-form label').textContent = 'OpenRouter API key';
+    $('#openrouter-settings').hidden = false;
+    $('#privacy-note').textContent = 'Your OpenRouter key stays in tab memory. Prompts and images go directly to OpenRouter and the selected model provider. Their data policies and free usage limits apply.';
+    $('#refresh-models').onclick = refreshFreeAvailability;
+  }
   $('#access-form').onsubmit = event => {
     event.preventDefault(); accessCode = $('#access-code').value.trim(); if (!accessCode) return;
     $('#access-code').value = ''; const resolve = resolveCode; resolveCode = null;
@@ -118,7 +143,8 @@ async function api(path, payload) {
     const code = await new Promise(resolve => { resolveCode = resolve; });
     if (!code) throw new Error('Generation cancelled.');
   }
-  try { return await (path === 'scene' ? generateScene(accessCode, payload) : generatePhoto(accessCode, payload)); }
+  const provider = useOpenRouter ? openrouter : { generateScene, generatePhoto };
+  try { return await (path === 'scene' ? provider.generateScene(accessCode, payload) : provider.generatePhoto(accessCode, payload)); }
   catch (e) { if (e.status === 401) accessCode = ''; throw e; }
 }
 try {
@@ -275,7 +301,7 @@ function updateResults(batch) {
     const label = document.createElement('span'); label.textContent = `Frame ${shot.frame}`; caption.append(label);
     if (shot.photo) {
       const link = document.createElement('a'); link.href = shot.photo;
-      link.download = `reframe-photo-${shot.id}.${shot.photo.startsWith('data:image/png') ? 'png' : 'jpg'}`;
+      link.download = `reframe-photo-${shot.id}.${shot.photo.startsWith('data:image/png') ? 'png' : shot.photo.startsWith('data:image/webp') ? 'webp' : 'jpg'}`;
       link.innerHTML = '<i data-lucide="download"></i> Save'; link.setAttribute('aria-label', `Download photograph ${shot.ordinal}`); caption.append(link);
     }
     card.append(caption); grid.append(card);
@@ -305,7 +331,7 @@ async function renderFrames(existingBatch = null) {
       shot.generating = true; shot.failed = false; updateResults(batch);
       status.textContent = `Creating image ${index + 1} of ${pending.length} from your composition.`;
       const result = await api('render', { prompt: shot.prompt, reference: shot.reference, composition: shot.composition, ratio: shot.ratio, notes: shot.notes });
-      if (typeof result.image !== 'string' || !/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/]+=*$/.test(result.image)) throw new Error('The AI service returned an invalid image.');
+      if (typeof result.image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(result.image)) throw new Error('The AI service returned an invalid image.');
       shot.photo = result.image; shot.source.photo = result.image; shot.generating = false; updateResults(batch);
     }
     title.textContent = batch.shots.length === 1 ? 'Your shot, brought to life.' : 'Your shots, brought to life.';
@@ -356,3 +382,5 @@ $('#cancel-new-chat').onclick = () => $('#new-chat-dialog').close();
 $('#confirm-new-chat').onclick = resetChat;
 $('#help').onclick = () => $('#help-dialog').showModal(); $('#close-help').onclick = () => $('#help-dialog').close(); $('#close-photo').onclick = () => $('#photo-dialog').close();
 updateShots(); setBusy(false); iconify();
+
+if (useOpenRouter) void refreshFreeAvailability();

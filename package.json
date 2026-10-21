@@ -10,7 +10,8 @@
     "test": "playwright test",
     "test:unit": "node --test test/*.test.js",
     "test:hosted": "playwright test --config playwright.hosted.config.js",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test:openrouter": "playwright test --config playwright.openrouter.config.js"
   },
   "dependencies": {
     "@openai/codex": "0.163.0",

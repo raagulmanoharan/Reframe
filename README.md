@@ -2,13 +2,28 @@
 
 A mobile-first chat and 3D camera for AI image generation. Send a description, a reference image, or both from the floating composer. Reframe replies with an **Open Studio** card. Frame up to four shots in the full-screen Three.js studio, add visual direction, and send the captured compositions back as a user message. Generated photographs arrive as the next assistant reply.
 
+## OpenRouter free models (default)
+
+The default app on GitHub Pages and new Render builds uses **OpenRouter**. Open **Account**, enter your own OpenRouter API key, and send a prompt or photo. Create or replace keys at [OpenRouter](https://openrouter.ai/settings/keys). The key is held only in tab memory and sent directly to OpenRouter over HTTPS; it is never bundled, logged, persisted, or sent to Reframe's server.
+
+Reframe checks OpenRouter's current model catalog in the browser. It selects a concrete `:free` model only when all listed prices are zero and no conditional pricing is present. Requests disable provider fallback and specify zero maximum prompt, completion, image and request prices. The app does not use paid fallbacks or promotional discounts. Free-provider availability, account settings and usage limits still apply.
+
+The two stages have separate capability requirements:
+
+- **3D scene:** text output, with image input support when a reference is attached. The response must pass the existing geometry/schema validation.
+- **Final photographs:** both image input and image output. Captured composition, product reference, notes and target ratio are sent together. A text-only answer is never shown as an image.
+
+**A compatible free image-generation model is not guaranteed to exist.** The app checks this upfront, reports unavailable photo generation, and preserves the studio frames. Account → **Refresh availability** checks again. The app does not claim the complete workflow is free unless compatible models are available for both stages.
+
+The live catalog and generation endpoint were blocked from the development workspace. The integration is verified with the official OpenRouter SDK's request/response definitions and fixture tests; live model availability, quality and account entitlement remain unverified. No real user key is included in the repository.
+
 ## Deploy on Render
 
 [Deploy Reframe on Render](https://render.com/deploy?repo=https://github.com/raagulmanoharan/Reframe)
 
-The repository includes a `render.yaml` Blueprint for one **free** Docker web service. Select this repository and `main`, and deploy the Blueprint. The same service serves the interface and its backend. No OpenAI API key, Vercel key, database, or paid disk is required for this deployment.
+The repository includes a `render.yaml` Blueprint for one **free** Docker web service. Select this repository and `main`, and deploy the Blueprint. The same service serves the interface and its backend. No shared provider key, database, or paid disk is required for this deployment. The default interface uses each visitor’s OpenRouter key as described above.
 
-On the Render app:
+The previous ChatGPT integration is still available as an opt-in build with `--build-arg VITE_AI_MODE=chatgpt`. In that build:
 
 1. Select **Continue with ChatGPT**. Open the OpenAI sign-in link, enter the displayed code, and return to Reframe. OpenAI may require enabling device code sign-in in ChatGPT security settings. This is device-code authentication, not a Google-style OAuth redirect.
 2. Type a scene, add an image with **+**, or both, then use the up-arrow **Send message** button.
@@ -27,7 +42,7 @@ Each browser session gets a separate Codex process with an in-memory credential 
 
 ## Run the Render version locally
 
-Use the container so it cannot read or alter an existing developer/agent Codex configuration:
+The default container serves the OpenRouter interface. To build the optional ChatGPT interface, pass `--build-arg VITE_AI_MODE=chatgpt`. Keep that integration in its dedicated container so it cannot read or alter existing developer/agent Codex configuration:
 
 ```sh
 docker build -t reframe .
@@ -36,16 +51,9 @@ docker run --rm -p 3000:3000 -e NODE_ENV=development reframe
 
 The health endpoint is `/api/health`. In a managed environment, follow its Docker proxy/CA guidance and pass the `proxy_ca` build secret when needed. Do not mount host credential directories or add shared provider credentials to this container.
 
-## Existing GitHub Pages version
+## Optional direct OpenAI version
 
-Pages remains a static, API-key version. It cannot run the ChatGPT sign-in backend. Its usage is:
-
-1. Describe the scene, add a reference, or both, then use **Send message**.
-2. Enter your own OpenAI API key. It is kept only in JavaScript memory, never bundled, persisted, or sent to a Reframe server. Reload or **Account → Forget key** clears it.
-3. Select **Open Studio**, frame up to four shots and add optional notes.
-4. Choose **Let’s Go**, then view and save the generated photographs.
-
-Generation is billed to the user's OpenAI API account. Scene generation uses `gpt-4.1-mini`; image editing uses `gpt-image-1` with high input fidelity. The account needs API credit and access to those models (image generation may require organization verification). Product references and composition images are sent directly to OpenAI over HTTPS, only on generation. There are no preset scene fallbacks or fake generated images. The scene chips only fill the prompt.
+Set `VITE_AI_MODE=openai` for the development server or production build to retain the earlier direct OpenAI API-key version. It uses `gpt-4.1-mini` for scenes and `gpt-image-1` for photographs; these are paid API requests. This mode is not the default and is never a fallback from OpenRouter. GitHub Pages now builds the default OpenRouter version.
 
 ## Run the static version
 
@@ -63,10 +71,10 @@ npm run dev
 - Generated scenes approximate product references with low-poly primitives; this is not mesh reconstruction.
 - Object movement edits individual primitive shapes, not an automatically grouped product mesh. Notes are text annotations attached to a frame, not a drawing layer.
 - Image generation is guided by the captured view but may alter composition or product details. Review outputs before commercial use.
-- The API-key version explicitly requests high image quality and high input fidelity. The ChatGPT version asks for the highest available detail; Codex's image tool controls the actual quality and output resolution automatically.
-- GPT Image returns square, landscape, or portrait sizes. Exported AI photo aspect ratios can differ from the selected draft ratio; the app preserves the original output without cropping it.
-- References are resized to 1024 px for upload. Shots and keys clear on reload.
-- The static Pages version uses a user-entered key in the browser; the Render version uses the session backend described above.
+- The optional direct OpenAI version explicitly requests high image quality and high input fidelity. The ChatGPT version asks for the highest available detail; Codex's image tool controls the actual quality and output resolution automatically.
+- In the optional direct OpenAI version, GPT Image returns square, landscape, or portrait sizes. Exported AI photo aspect ratios can differ from the selected draft ratio; the app preserves the original output without cropping it.
+- References are resized to 1024 px for upload. Shots and keys clear on reload. OpenRouter output resolution and image quality depend on the selected free model; spatial adherence is still guidance, not a guarantee.
+- OpenRouter is the default for Pages and Render. The optional ChatGPT build uses the isolated session backend described above. An OpenRouter key does not use ChatGPT subscription access.
 
 ## Verification
 
@@ -74,10 +82,11 @@ npm run dev
 npm run test:unit
 npm test
 npm run test:hosted
+npm run test:openrouter
 npm run build
 ```
 
-Unit tests check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
+OpenRouter tests check free-price guards, modality selection, ordered composition/reference inputs, provider failures, chat rendering, downloads, unavailable free photo generation and recovery. Unit tests also check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
 
 Playwright uses `/usr/bin/chromium` by default; set `CHROMIUM_PATH` if needed. Tests start Vite automatically. Physical multitouch ergonomics still need a device trial.
 
