@@ -1,9 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { validateScene } from '../lib/scene-schema.js';
 import { sceneGroups } from '../lib/scene-groups.js';
+import { validateLens } from '../lib/camera-settings.js';
 
-export function createStudio(container, ratio, onSelection = () => {}) {
+export function createStudio(container, ratio, onSelection = () => {}, onCameraChange = () => {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
@@ -30,6 +35,9 @@ export function createStudio(container, ratio, onSelection = () => {}) {
   scene.add(sun);
   const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(5, 3, 5); scene.add(fill);
   let layout = null, selected = null, drag = null, undo = [], active = false, enabled = true;
+  let lens = { zoom: 1, focusDistance: 1, blur: 0 }, focusAnchor = null, needsRender = true;
+  let composer, bokeh, composerSize = '', cameraNotice = '';
+  controls.addEventListener('change', () => { needsRender = true; });
   const touches = new Map();
   let handingOff = false;
   let meshes = [], entities = [];
@@ -37,6 +45,7 @@ export function createStudio(container, ratio, onSelection = () => {}) {
   const highlight = new THREE.BoxHelper(new THREE.Object3D(), 0x9b742e);
   highlight.visible = false; scene.add(highlight);
   function selectionChanged() {
+    needsRender = true;
     if (selected !== null) highlight.setFromObject(entities[selected].node);
     highlight.visible = selected !== null;
     onSelection(selected === null ? null : { index: selected, name: entities[selected].name, height: entities[selected].node.position.y, scale: entities[selected].node.scale.x }, undo.length > 0);
@@ -86,6 +95,63 @@ export function createStudio(container, ratio, onSelection = () => {}) {
   function stopCameraMotion() {
     controls.enableDamping = false; controls.update(); controls.enableDamping = true;
   }
+  function focusWorldPoint() {
+    const entity = focusAnchor && entities.find(item => item.name === focusAnchor.group);
+    if (!entity) return null;
+    entity.node.updateWorldMatrix(true, false);
+    return entity.node.localToWorld(focusAnchor.local.clone());
+  }
+  function getLens() {
+    camera.updateMatrixWorld();
+    const point = focusWorldPoint();
+    if (point) lens.focusDistance = THREE.MathUtils.clamp(-point.clone().applyMatrix4(camera.matrixWorldInverse).z, 0.1, 200);
+    return { ...lens, ...(point ? { focusTarget: { group: focusAnchor.group, point: point.toArray() } } : {}) };
+  }
+  function cameraChanged() {
+    const settings = getLens();
+    const key = `${settings.zoom}|${settings.focusDistance.toFixed(2)}|${settings.blur}|${settings.focusTarget?.group || ''}`;
+    if (key !== cameraNotice) { cameraNotice = key; onCameraChange(settings); }
+  }
+  function applyLens(settings) {
+    const next = validateLens(settings);
+    lens = { zoom: next.zoom, focusDistance: next.focusDistance, blur: next.blur }; focusAnchor = null;
+    const entity = next.focusTarget && entities.find(item => item.name === next.focusTarget.group);
+    if (entity) {
+      entity.node.updateWorldMatrix(true, false);
+      focusAnchor = { group: entity.name, local: entity.node.worldToLocal(new THREE.Vector3(...next.focusTarget.point)) };
+    }
+    camera.zoom = lens.zoom; camera.updateProjectionMatrix(); needsRender = true; cameraChanged();
+  }
+  function setZoom(zoom) { applyLens({ ...getLens(), zoom }); }
+  function setFocusDistance(focusDistance) { applyLens({ ...lens, focusDistance }); }
+  function setBlur(blur) { applyLens({ ...getLens(), blur }); }
+  function focusOn(point, entity) {
+    applyLens({ ...lens, focusTarget: { group: entity.name, point: point.toArray() } });
+  }
+  function focusSelected() {
+    if (selected === null) return;
+    const entity = entities[selected], point = new THREE.Box3().setFromObject(entity.node).getCenter(new THREE.Vector3());
+    focusOn(point, entity);
+  }
+  function renderView(fullResolution = false) {
+    cameraChanged();
+    if (!lens.blur) { renderer.render(scene, camera); needsRender = false; return; }
+    if (!composer) {
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      bokeh = new BokehPass(scene, camera, { focus: lens.focusDistance, aperture: 0.01, maxblur: 0.025 });
+      composer.addPass(bokeh); composer.addPass(new OutputPass());
+    }
+    const size = renderer.getSize(new THREE.Vector2());
+    // Limit live preview work on phones; captures use their full 1024px size.
+    const pixelRatio = fullResolution ? 1 : Math.min(1, 900 / Math.max(size.x, size.y));
+    const key = `${size.x}|${size.y}|${pixelRatio}`;
+    if (key !== composerSize) { composer.setPixelRatio(pixelRatio); composer.setSize(size.x, size.y); composerSize = key; }
+    bokeh.uniforms.focus.value = lens.focusDistance;
+    bokeh.uniforms.aperture.value = lens.blur / 100 * 0.04 / Math.max(1, lens.focusDistance);
+    bokeh.uniforms.maxblur.value = lens.blur / 100 * 0.035;
+    composer.render(); needsRender = false;
+  }
   function cast(event) {
     const bounds = renderer.domElement.getBoundingClientRect();
     pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
@@ -119,7 +185,7 @@ export function createStudio(container, ratio, onSelection = () => {}) {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.point.y);
     const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
     if (!point) { controls.enabled = true; return; }
-    drag = { pointerId: event.pointerId, plane, offset: entities[selected].node.position.clone().sub(point), x: event.clientX, y: event.clientY, moved: false };
+    drag = { pointerId: event.pointerId, plane, offset: entities[selected].node.position.clone().sub(point), x: event.clientX, y: event.clientY, moved: false, focusPoint: hit.point.clone() };
     surface.setPointerCapture(event.pointerId);
     container.style.cursor = 'grabbing';
   }, true);
@@ -141,6 +207,7 @@ export function createStudio(container, ratio, onSelection = () => {}) {
   const release = event => {
     touches.delete(event.pointerId);
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (!drag.moved && event.type === 'pointerup') focusOn(drag.focusPoint, entities[selected]);
     event.stopImmediatePropagation(); drag = null; controls.enabled = enabled; container.style.cursor = 'grab';
     if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
     selectionChanged();
@@ -162,6 +229,7 @@ export function createStudio(container, ratio, onSelection = () => {}) {
     const distance = camera.position.distanceTo(controls.target);
     controls.minDistance = Math.max(0.15, distance * 0.08); controls.maxDistance = Math.max(20, distance * 4);
     controls.update();
+    applyLens({ zoom: 1, focusDistance: THREE.MathUtils.clamp(distance, 0.1, 200), blur: 0 });
   }
   function setScene(next) {
     validateScene(next);
@@ -190,10 +258,10 @@ export function createStudio(container, ratio, onSelection = () => {}) {
     const [rw, rh] = ratio.value.split(':').map(Number), aspect = rw / rh;
     const width = Math.min(viewport.clientWidth, viewport.clientHeight * aspect), height = width / aspect;
     Object.assign(container.style, { position: 'absolute', width: `${width}px`, height: `${height}px`, left: `${(viewport.clientWidth - width) / 2}px`, top: `${(viewport.clientHeight - height) / 2}px` });
-    renderer.setSize(width, height); camera.aspect = aspect; camera.updateProjectionMatrix();
+    renderer.setSize(width, height); camera.aspect = aspect; camera.updateProjectionMatrix(); needsRender = true;
   }
   new ResizeObserver(resize).observe(container.parentElement);
-  renderer.setAnimationLoop(() => { if (active && !document.hidden) { controls.update(); renderer.render(scene, camera); } });
+  renderer.setAnimationLoop(() => { if (active && !document.hidden) { controls.update(); if (needsRender) renderView(); } });
   function capture() {
     if (!layout) throw new Error('Create a scene first.');
     stopCameraMotion();
@@ -205,24 +273,26 @@ export function createStudio(container, ratio, onSelection = () => {}) {
       const [w, h] = ratio.value.split(':').map(Number);
       const width = w >= h ? 1024 : Math.round(1024 * w / h), height = h >= w ? 1024 : Math.round(1024 * h / w);
       renderer.setPixelRatio(1); renderer.setSize(width, height, false);
-      camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.render(scene, camera);
-      return { scene: structuredClone(layout), composition: renderer.domElement.toDataURL('image/jpeg', 0.88), position: camera.position.toArray(), target: controls.target.toArray(), ratio: ratio.value };
+      camera.aspect = w / h; camera.updateProjectionMatrix(); renderView(true);
+      return { scene: structuredClone(layout), composition: renderer.domElement.toDataURL('image/jpeg', 0.88), position: camera.position.toArray(), target: controls.target.toArray(), ratio: ratio.value, lens: getLens() };
     } finally {
       highlight.visible = wasHighlighted;
       renderer.setPixelRatio(pixelRatio); renderer.setSize(size.x, size.y, false);
-      camera.aspect = aspect; camera.updateProjectionMatrix(); renderer.render(scene, camera);
+      camera.aspect = aspect; camera.updateProjectionMatrix(); renderView();
     }
   }
   function restore(shot) {
     setScene(shot.scene); camera.position.fromArray(shot.position); controls.target.fromArray(shot.target);
     ratio.value = shot.ratio; controls.update(); resize();
+    applyLens(shot.lens || { zoom: 1, focusDistance: THREE.MathUtils.clamp(camera.position.distanceTo(controls.target), 0.1, 200), blur: 0 });
   }
   function replaceScene(next) {
     stopCameraMotion();
-    const position = camera.position.clone(), target = controls.target.clone();
+    const position = camera.position.clone(), target = controls.target.clone(), settings = getLens();
     setScene(next); camera.position.copy(position); controls.target.copy(target); controls.update();
+    applyLens(settings);
   }
-  return { setScene, replaceScene, reset, resize, capture, restore, selectObject, setHeight, setScale, undoMove,
+  return { setScene, replaceScene, reset, resize, capture, restore, selectObject, setHeight, setScale, undoMove, setZoom, setFocusDistance, setBlur, focusSelected, getLens,
     snapshot: () => structuredClone(layout),
     setEnabled: value => { enabled = value; controls.enabled = value; if (!value) { stopCameraMotion(); drag = null; } selectionChanged(); },
     getObjects: () => entities.map((object, index) => ({ name: object.name, index })),

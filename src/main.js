@@ -1,12 +1,12 @@
 import './style.css';
-import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
+import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
 import { createStudio } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
 import * as openrouter from './openrouter.js';
 import { startOpenRouterLogin } from './openrouter-auth.js';
 import { setupChatGPT } from './chatgpt.js';
 import { addNode, additionBrief, mergeAddition } from '../lib/scene-additions.js';
-const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
+const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
 const $ = selector => document.querySelector(selector);
 const iconify = () => createIcons({ icons });
 const aiMode = import.meta.env.VITE_AI_MODE || 'openrouter';
@@ -25,7 +25,7 @@ function setBusy(value, text = '') {
   document.querySelectorAll('.open-studio, .retry-render').forEach(button => { button.disabled = value; });
   $('#new-chat').disabled = value;
   studio?.setEnabled(!value);
-  for (const id of ['exit-studio', 'reset', 'ratio', 'object-select']) $(`#${id}`).disabled = value;
+  for (const id of ['exit-studio', 'reset', 'ratio', 'object-select', 'camera-zoom', 'camera-focus', 'camera-blur']) $(`#${id}`).disabled = value;
   $('#object-height').disabled = value || !selectedObject;
   $('#object-scale').disabled = value || !selectedObject;
   $('#status').textContent = text;
@@ -107,7 +107,7 @@ async function refreshFreeAvailability() {
 function closeStudio() {
   if (busy) return;
   if (activeTurn && !$('#studio-panel').hidden) { activeTurn.view = studio.capture(); activeTurn.shots = shots; Object.assign(activeTurn, current); activeTurn.addition = pendingAddition; }
-  $('#studio-panel').hidden = true; $('#notes-panel').hidden = true; $('#element-form').hidden = true;
+  $('#studio-panel').hidden = true; $('#notes-panel').hidden = true; $('#element-form').hidden = true; showCameraControls(false);
   $('#toast').classList.remove('show');
   $('#app').inert = false; document.body.style.overflow = ''; studio?.setActive(false);
   activeTurn?.button.focus({ preventScroll: true });
@@ -215,17 +215,32 @@ try {
       $('#object-scale').value = selection.scale;
     }
     $('#undo-move').disabled = busy || !canUndo;
+  }, lens => {
+    $('#camera-zoom').value = lens.zoom; $('#camera-zoom-value').textContent = `${lens.zoom.toFixed(1)}×`;
+    $('#camera-focus').value = Math.log(lens.focusDistance / 0.1) / Math.log(2000) * 100;
+    $('#camera-focus').setAttribute('aria-valuetext', `${lens.focusDistance.toFixed(1)} scene units`);
+    $('#camera-focus-value').textContent = lens.focusDistance.toFixed(1);
+    $('#camera-blur').value = lens.blur; $('#camera-blur-value').textContent = lens.blur ? `${Math.round(lens.blur)}%` : 'Off';
+    $('#camera-focus-subject').textContent = lens.focusTarget ? `Focus: ${lens.focusTarget.group}` : 'Tap an object to focus. Blur softens other depths.';
   });
 } catch { $('#webgl-error').hidden = false; }
 function populateObjects() {
   $('#object-select').replaceChildren(new Option('Select an object', ''));
   for (const object of studio.getObjects()) $('#object-select').add(new Option(object.name, String(object.index)));
 }
-$('#object-select').onchange = event => studio.selectObject(event.target.value === '' ? null : Number(event.target.value));
+$('#object-select').onchange = event => { studio.selectObject(event.target.value === '' ? null : Number(event.target.value)); studio.focusSelected(); };
 $('#object-height').oninput = event => studio.setHeight(Number(event.target.value));
 $('#object-scale').oninput = event => studio.setScale(Number(event.target.value));
 $('#undo-move').onclick = () => studio.undoMove();
 $('#reset').onclick = () => studio?.reset(); $('#ratio').onchange = () => studio?.resize();
+function showCameraControls(show) {
+  $('#camera-controls').hidden = !show; $('#camera-settings').setAttribute('aria-expanded', String(show));
+}
+$('#camera-settings').onclick = () => showCameraControls($('#camera-controls').hidden);
+$('#camera-zoom').oninput = event => studio.setZoom(Number(event.target.value));
+$('#camera-focus').oninput = event => studio.setFocusDistance(Math.min(200, 0.1 * 2000 ** (Number(event.target.value) / 100)));
+$('#camera-blur').oninput = event => studio.setBlur(Number(event.target.value));
+
 function openStudio(turn) {
   if (!turn || busy) return;
   activeTurn = turn; current = { prompt: turn.prompt, reference: turn.reference }; shots = turn.shots;
@@ -291,6 +306,7 @@ $('#studio-panel').addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     if (!$('#notes-panel').hidden) { $('#notes-panel').hidden = true; $('#annotate').focus(); }
     else if (!$('#element-form').hidden) { $('#element-form').hidden = true; $('#add-element').focus(); }
+    else if (!$('#camera-controls').hidden) { showCameraControls(false); $('#camera-settings').focus(); }
     else closeStudio();
   }
   if (event.key === 'Tab') {
@@ -443,7 +459,7 @@ async function renderFrames(existingBatch = null) {
     for (const [index, shot] of pending.entries()) {
       shot.generating = true; shot.failed = false; updateResults(batch);
       status.textContent = `Creating image ${index + 1} of ${pending.length} from your composition.`;
-      const result = await api('render', { prompt: shot.prompt, reference: shot.reference, composition: shot.composition, ratio: shot.ratio, notes: shot.notes });
+      const result = await api('render', { prompt: shot.prompt, reference: shot.reference, composition: shot.composition, ratio: shot.ratio, notes: shot.notes, lens: shot.lens });
       if (typeof result.image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(result.image)) throw new Error('The AI service returned an invalid image.');
       shot.photo = result.image; shot.source.photo = result.image; shot.generating = false; updateResults(batch);
     }

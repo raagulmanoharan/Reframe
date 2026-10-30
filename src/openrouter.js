@@ -1,5 +1,6 @@
 import { draftSchema, expandDraft, draftInstructions } from '../lib/scene-draft.js';
 import { sceneBrief, notesInstruction } from '../lib/generation-input.js';
+import { lensInstructions } from '../lib/camera-settings.js';
 
 const baseURL = 'https://openrouter.ai/api/v1';
 const zero = value => (typeof value === 'string' && value.trim() !== '' || typeof value === 'number') && Number(value) === 0;
@@ -133,10 +134,10 @@ export async function generateScene(key, input, { signal, onProgress = () => {} 
 }
 export async function generatePhoto(key, input) {
   const composition = inputImage(input.composition, true), reference = inputImage(input.reference);
-  const prompt = sceneBrief(input.prompt, reference), notes = notesInstruction(input.notes);
+  const prompt = sceneBrief(input.prompt, reference), notes = notesInstruction(input.notes), camera = lensInstructions(input.lens);
   if (!['1:1', '4:3', '9:16', '16:9'].includes(input.ratio)) throw new Error('Invalid aspect ratio.');
   const model = chooseModel(await getFreeModels(), { photo: true });
-  const text = `Turn the FIRST image, a low-poly composition, into a photorealistic photograph. Preserve its camera viewpoint, framing, perspective, object positions, scale and spatial relationships. Refine the block shapes into realistic forms. Scene: ${prompt}. Aspect ratio: ${input.ratio}. ${reference ? 'The SECOND image is the product reference: preserve its design, colors, proportions and distinctive details. It defines appearance, not composition.' : ''}${notes}\nReturn one generated image, not a description or image URL.`;
+  const text = `Turn the FIRST image, a low-poly composition, into a photorealistic photograph. Preserve its camera viewpoint, framing, perspective, object positions, scale and spatial relationships. Refine the block shapes into realistic forms. Scene: ${prompt}. Aspect ratio: ${input.ratio}. ${reference ? 'The SECOND image is the product reference: preserve its design, colors, proportions and distinctive details. It defines appearance, not composition.' : ''}${notes}${camera}\nReturn one generated image, not a description or image URL.`;
   const result = await complete(key, model, {
     modalities: model.architecture.output_modalities.includes('text') ? ['image', 'text'] : ['image'],
     messages: [{ role: 'user', content: [composition, ...(reference ? [reference] : []), { type: 'text', text }] }],

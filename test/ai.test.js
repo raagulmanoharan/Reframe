@@ -32,11 +32,12 @@ test('photo edit sends composition, product reference and frame notes at high qu
     assert.equal(options.body.get('input_fidelity'), 'high');
     assert.equal(options.body.get('quality'), 'high');
     assert.match(options.body.get('prompt'), /Keep the emerald green/);
+    assert.match(options.body.get('prompt'), /lens zoom 1.50x/); assert.match(options.body.get('prompt'), /strong depth-of-field blur/);
     assert.equal(options.body.get('size'), '1024x1536');
     const images = options.body.getAll('image[]'); assert.equal(images.length, 2);
     assert.equal(images[0].name, 'composition.png'); assert.equal(images[1].name, 'reference.png');
     return Response.json({ data: [{ b64_json: png.split(',')[1] }] });
-  }, async () => assert.match((await generatePhoto('test-only', { prompt: 'A ring', reference: png, composition: png, ratio: '9:16', notes: 'Keep the emerald green' })).image, /^data:image\/jpeg;base64,/));
+  }, async () => assert.match((await generatePhoto('test-only', { prompt: 'A ring', reference: png, composition: png, ratio: '9:16', notes: 'Keep the emerald green', lens: { zoom: 1.5, focusDistance: 8, blur: 80 } })).image, /^data:image\/jpeg;base64,/));
 });
 test('a reference image alone is a valid scene brief', async () => {
   await provider(async (url, options) => {

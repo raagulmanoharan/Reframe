@@ -50,9 +50,10 @@ test('free image generation preserves ordered composition/reference, annotations
     assert.equal(body.messages[0].content[0].image_url.url, image);
     assert.equal(body.messages[0].content[1].image_url.url, reference);
     assert.match(body.messages[0].content[2].text, /Keep the stitching/);
+    assert.match(body.messages[0].content[2].text, /lens zoom 1.50x/); assert.match(body.messages[0].content[2].text, /moderate depth-of-field blur/);
     assert.equal(body.image_config.aspect_ratio, '16:9');
     return Response.json({ choices: [{ message: { images: [{ image_url: { url: image } }] } }] });
-  }, async () => assert.equal((await generatePhoto('fixture-key', { prompt: 'sofa', reference, composition: image, ratio: '16:9', notes: 'Keep the stitching' })).image, image));
+  }, async () => assert.equal((await generatePhoto('fixture-key', { prompt: 'sofa', reference, composition: image, ratio: '16:9', notes: 'Keep the stitching', lens: { zoom: 1.5, focusDistance: 8, blur: 50 } })).image, image));
 });
 test('no image-output model fails before inference and text is never treated as a generated photograph', async () => {
   await provider([free], () => { assert.fail('No inference call should be made'); }, async () => assert.rejects(generatePhoto('fixture-key', { prompt: 'sofa', composition: image, ratio: '4:3' }), /no compatible free image/));

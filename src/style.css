@@ -142,3 +142,15 @@ dialog { color: var(--ink); border: 1px solid #fff; border-radius: 28px; backgro
   #studio-panel:has(#addition-controls:not([hidden])) #shots,
   #studio-panel:has(#element-form:not([hidden])) #shots { display:none; }
 }
+
+#camera-settings[aria-expanded=true] { background:#ffffff1a; color:#fff; }
+#camera-controls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px 14px; padding:4px 16px 10px; flex-shrink:0; background:#ffffff04; border-bottom:1px solid #ffffff0c; }
+#camera-controls label { display:grid; grid-template-columns:1fr auto; gap:5px; font-size:11px; min-width:0; }
+#camera-controls output { color:#c7c8d4; font-variant-numeric:tabular-nums; }
+#camera-controls input { grid-column:1 / -1; width:100%; min-width:0; margin:0; height:24px; accent-color:#d8d9e9; }
+#camera-focus-subject { grid-column:1 / -1; margin:0; font-size:11px; color:#b4b4bf; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+@media(max-height:580px) {
+  #studio-panel:has(#camera-controls:not([hidden])) #shots,
+  #studio-panel:has(#camera-controls:not([hidden])) #object-controls { display:none; }
+  #camera-controls { padding:2px 12px 5px; gap:2px 14px; }
+}

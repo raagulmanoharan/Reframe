@@ -6,6 +6,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { sceneSchema, validateScene } from '../lib/scene-schema.js';
 import { sceneBrief, frameNotes, notesInstruction } from '../lib/generation-input.js';
+import { validateLens, lensInstructions } from '../lib/camera-settings.js';
 
 export class AppError extends Error {
   constructor(message, status = 502) { super(message); this.status = status; }
@@ -26,6 +27,8 @@ export function validateInput(kind, input) {
   catch (error) { throw new AppError(error.message, 400); }
   const result = { prompt, reference, notes };
   if (kind === 'photo') {
+    try { result.lens = validateLens(input.lens); }
+    catch (error) { throw new AppError(error.message, 400); }
     result.composition = image(input.composition, true);
     if (!['4:3', '1:1', '9:16', '16:9'].includes(input.ratio)) throw new AppError('Invalid aspect ratio.', 400);
     result.ratio = input.ratio;
@@ -166,7 +169,7 @@ export class CodexSession extends EventEmitter {
       inputItems.push({ type: 'text', text: kind === 'scene' ? data.prompt :
         `Turn the FIRST image, a low-poly composition, into a polished photorealistic photograph with the highest available detail and image quality. Preserve viewpoint, framing, perspective, subject placement and scale. Scene: ${data.prompt}.
 The intended aspect ratio is ${data.ratio}. ${data.reference ? 'The SECOND image is the product reference. Preserve its design, colors and proportions; it does not define the composition.' : ''}
-${notesInstruction(data.notes)}
+${notesInstruction(data.notes)}${lensInstructions(data.lens)}
 Use image_gen.imagegen with num_last_images_to_include=${data.reference ? 2 : 1}, transparent_background=false. Do not use referenced_image_paths. Generate one image now.` });
       const items = new Map();
       let settle, fail;
