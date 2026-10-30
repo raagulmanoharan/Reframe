@@ -178,15 +178,16 @@ function acceptKey(key) {
   const resolve = resolveCode; resolveCode = null;
   $('#access-dialog').close(); resolve?.(key);
 }
-async function api(path, payload) {
+async function api(path, payload, options = {}) {
   if (chatgpt) return chatgpt(path, payload);
   if (!accessCode) {
     $('#access-dialog').showModal();
     const code = await new Promise(resolve => { resolveCode = resolve; });
     if (!code) throw new Error('Generation cancelled.');
   }
+  if (options.signal?.aborted) throw new Error('Scene generation stopped. Your message is still here.');
   const provider = useOpenRouter ? openrouter : { generateScene, generatePhoto };
-  try { return await (path === 'scene' ? provider.generateScene(accessCode, payload) : provider.generatePhoto(accessCode, payload)); }
+  try { return await (path === 'scene' ? provider.generateScene(accessCode, payload, options) : provider.generatePhoto(accessCode, payload)); }
   catch (e) { if (e.status === 401) { accessCode = ''; updateOpenRouterAccount(); } throw e; }
 }
 try {
@@ -254,10 +255,19 @@ $('#brief-form').onsubmit = async event => {
   const sent = userMessage(typedPrompt, sceneReference ? [{ src: sceneReference, alt: 'Your reference photo' }] : []);
   $('#prompt').value = ''; resizeComposer(); clearReference();
   const pending = document.createElement('article'); pending.className = 'chat-message assistant-message thinking-message';
-  pending.innerHTML = '<span class="thinking-dot"></span><span>Setting the scene…</span>'; appendMessage(pending);
+  pending.innerHTML = '<span class="thinking-dot"></span><span class="thinking-label">Setting the scene…</span>';
+  const controller = new AbortController();
+  if (useOpenRouter) {
+    const stop = document.createElement('button'); stop.type = 'button'; stop.className = 'quiet stop-scene'; stop.textContent = 'Stop';
+    stop.onclick = () => { controller.abort(); stop.disabled = true; }; pending.append(stop);
+  }
+  appendMessage(pending);
   error(); setBusy(true, 'Arranging your scene…');
   try {
-    const data = await api('scene', { prompt, reference: sceneReference });
+    const data = await api('scene', { prompt, reference: sceneReference }, {
+      signal: controller.signal,
+      onProgress: text => { if (pending.isConnected) pending.querySelector('.thinking-label').textContent = text; },
+    });
     // Each response retains its own scene and frames when another message is sent.
     if (activeTurn) activeTurn.shots = shots;
     studio.setScene(data.scene); current = { prompt, reference: sceneReference };
@@ -282,7 +292,7 @@ $('#brief-form').onsubmit = async event => {
       if (sceneReference) showReference(sceneReference, 'Reference photo'); else clearReference();
       $('#prompt').focus();
     };
-    pending.append(copy, retry); sent.dataset.failed = 'true'; error(message(e)); scrollChat();
+    pending.append(copy, retry); sent.dataset.failed = 'true'; scrollChat();
   } finally { setBusy(false); }
 };
 function updateShots() {

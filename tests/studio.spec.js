@@ -65,9 +65,9 @@ test('image-only input produces a scene card; empty input and provider failures 
   });
   await page.goto('/'); await page.locator('#build').click(); await expect(page.locator('#error')).toContainText('add an image'); await expect(page.locator('#access-dialog')).toBeHidden();
   await upload(page); await page.locator('#build').click(); await enterKey(page);
-  await expect(page.locator('#error')).toContainText('key was not accepted'); await expect(page.locator('#scene-card')).toBeHidden(); await expect(page.locator('#studio-panel')).toBeHidden();
+  await expect(page.locator('.message-failed').last()).toContainText('key was not accepted'); await expect(page.locator('#scene-card')).toBeHidden(); await expect(page.locator('#studio-panel')).toBeHidden();
   await page.getByRole('button', { name: 'Use this message again' }).click();
-  await page.locator('#build').click(); await expect(page.locator('#access-dialog')).toBeVisible(); await page.locator('#cancel-access').click(); await expect(page.locator('#error')).toHaveText('Generation cancelled.');
+  await page.locator('#build').click(); await expect(page.locator('#access-dialog')).toBeVisible(); await page.locator('#cancel-access').click(); await expect(page.locator('.message-failed').last()).toContainText('Generation cancelled.');
 });
 test('earlier studio cards and failed image replies keep their own context across chat turns', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

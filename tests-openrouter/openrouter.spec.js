@@ -40,3 +40,31 @@ test('missing free photo support is visible upfront; availability can recover wi
   await expect(page.locator('#provider-availability')).toContainText(photo.id); await page.locator('#cancel-access').click();
   await page.locator('#enter-studio').click(); await expect(page.locator('#shot-count')).toHaveText('1 / 4 frames'); await expect(page.locator('#render')).toBeEnabled();
 });
+test('the reported rocking-chair truncation recovers automatically without asking for a simpler prompt', async ({ page }) => {
+  let calls = 0;
+  await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ json: { data: [model] } }));
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    calls++; const body = route.request().postDataJSON();
+    expect(body.messages[1].content[0].text).toBe('A living room with a rocking chair');
+    return route.fulfill({ json: { choices: [{ finish_reason: calls === 1 ? 'length' : 'stop', message: { content: calls === 1 ? '{"objects":[' : JSON.stringify(scene) } }] } });
+  });
+  await page.goto('/'); await page.locator('#prompt').fill('A living room with a rocking chair'); await page.locator('#build').click(); await connect(page);
+  await expect(page.locator('#enter-studio')).toBeVisible(); expect(calls).toBe(2);
+  await expect(page.locator('.user-message')).toHaveCount(1); await expect(page.locator('.message-failed')).toHaveCount(0);
+});
+test('a failed scene appears once and Stop cancels a slow provider without generating a scene', async ({ page }) => {
+  let calls = 0, slow = false;
+  await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ json: { data: [model] } }));
+  await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    calls++; if (slow) return;
+    return route.fulfill({ json: { choices: [{ finish_reason: 'length', message: { content: '{"objects":[' } }] } });
+  });
+  await page.goto('/'); await page.locator('#prompt').fill('A living room with a rocking chair'); await page.locator('#build').click(); await connect(page);
+  await expect(page.locator('.message-failed')).toContainText('Your prompt is fine');
+  await expect(page.locator('#error')).toBeHidden(); await expect(page.locator('#enter-studio')).toHaveCount(0); expect(calls).toBe(2);
+  slow = true; await page.getByRole('button', { name: 'Use this message again' }).click(); await page.locator('#build').click();
+  await expect(page.locator('.thinking-label')).toHaveText('Creating your 3D draft…');
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page.locator('.message-failed').last()).toContainText('generation stopped');
+  await expect(page.locator('#build')).toBeEnabled(); await expect(page.locator('#error')).toBeHidden();
+});
