@@ -21,7 +21,7 @@ test('sofa parts move as one object, independently of the lamp, through capture,
       part('Back', 'Sofa', [0, 1.1, -0.6], [2.4, 1.2, 0.2]),
     ] };
     const studio = createStudio(container, { value: '1:1' }, selection => { window.groupSelection = selection; });
-    studio.setScene(scene); studio.setActive(true); studio.resize(); studio.setMoveMode(true);
+    studio.setScene(scene); studio.setActive(true); studio.resize();
     window.groupTest = { studio, original: studio.capture(), project(position) {
       const camera = new THREE.PerspectiveCamera(44, 1, 0.03, 200);
       camera.position.fromArray(scene.camera.position); camera.lookAt(...scene.camera.target); camera.updateMatrixWorld();
@@ -62,8 +62,49 @@ test('sofa parts move as one object, independently of the lamp, through capture,
   });
   expect(await page.evaluate(() => window.groupTest.studio.capture().scene)).toEqual(raised);
   expect(await page.evaluate(() => window.groupTest.original.scene)).toEqual(original);
+  const resized = await page.evaluate(() => {
+    const { studio } = window.groupTest; studio.selectObject(0); studio.setScale(1.5); return studio.capture().scene;
+  });
+  raised.objects.forEach((part, index) => {
+    if (part.group === 'Sofa') part.size.forEach((value, axis) => expect(resized.objects[index].size[axis]).toBeCloseTo(value * 1.5));
+    else expect(resized.objects[index]).toEqual(part);
+  });
+  await page.evaluate(() => window.groupTest.studio.undoMove());
+  expect(await page.evaluate(() => window.groupTest.studio.capture().scene)).toEqual(raised);
   const clamped = await page.evaluate(() => {
     const { studio } = window.groupTest; studio.selectObject(0); studio.setHeight(1000); return studio.capture().scene;
   });
   for (const part of clamped.objects) expect(part.position[1]).toBeLessThanOrEqual(25);
+  await page.evaluate(() => window.groupTest.studio.restore(window.groupTest.original));
+  const cameraBefore = await page.evaluate(() => window.groupTest.studio.capture().position);
+  const bounds = await page.locator('#group-test canvas').boundingBox();
+  await page.mouse.move(bounds.x + 15, bounds.y + 15); await page.mouse.down();
+  await page.mouse.move(bounds.x + 65, bounds.y + 30, { steps: 5 }); await page.mouse.up();
+  expect(await page.evaluate(() => window.groupTest.studio.capture().position)).not.toEqual(cameraBefore);
+  expect(await page.evaluate(() => window.groupTest.studio.capture().scene)).toEqual(original);
+
+  const outsideCamera = await page.evaluate(() => window.groupTest.studio.capture().position);
+  await page.mouse.move(20, 50); await page.mouse.down();
+  await page.mouse.move(80, 70, { steps: 5 }); await page.mouse.up();
+  expect(await page.evaluate(() => window.groupTest.studio.capture().position)).not.toEqual(outsideCamera);
+
+  // Native touch events: the first finger lands on the sofa, then a second
+  // finger turns the gesture into camera pinch/pan without changing geometry.
+  await page.evaluate(() => window.groupTest.studio.restore(window.groupTest.original));
+  const point = await page.evaluate(() => window.groupTest.project([-1.2, 0.9, 0.15]));
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x: point.x, y: point.y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x: point.x, y: point.y }, { id: 2, x: point.x + 60, y: point.y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 1, x: point.x - 15, y: point.y }, { id: 2, x: point.x + 85, y: point.y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  expect(await page.evaluate(() => window.groupTest.studio.capture().scene)).toEqual(original);
+  expect(await page.evaluate(() => window.groupTest.studio.capture().position)).not.toEqual(cameraBefore);
+  const replacement = await page.evaluate(async () => {
+    const { addNode } = await import('/lib/scene-additions.js');
+    const { studio } = window.groupTest, before = studio.capture();
+    studio.replaceScene(addNode(before.scene, 'Plant', before.target).scene);
+    const after = studio.capture();
+    return { before: { position: before.position, target: before.target, ratio: before.ratio }, after: { position: after.position, target: after.target, ratio: after.ratio } };
+  });
+  expect(replacement.after).toEqual(replacement.before);
 });

@@ -1,11 +1,12 @@
 import './style.css';
-import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
+import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
 import { createStudio } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
 import * as openrouter from './openrouter.js';
 import { startOpenRouterLogin } from './openrouter-auth.js';
 import { setupChatGPT } from './chatgpt.js';
-const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
+import { addNode, additionBrief, mergeAddition } from '../lib/scene-additions.js';
+const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
 const $ = selector => document.querySelector(selector);
 const iconify = () => createIcons({ icons });
 const aiMode = import.meta.env.VITE_AI_MODE || 'openrouter';
@@ -14,6 +15,7 @@ const useOpenRouter = aiMode === 'openrouter';
 let freePhotoAvailable = null, loginAttempt = null;
 let current = null, shots = [], shotId = 0, reference = null, studio, busy = false, activeTurn = null, resultOrdinal = 0;
 let timer, accessCode = '', resolveCode, activeShot = null, notes = '', loggedIn = false;
+let pendingAddition = null, additionController = null, selectedObject = null;
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('show'); clearTimeout(timer); timer = setTimeout(() => $('#toast').classList.remove('show'), 3500); }
 function error(text = '') { $('#error').textContent = text; $('#error').hidden = !text; }
 function message(e) { return e.name === 'TimeoutError' ? 'Generation timed out. Please try again.' : e instanceof TypeError ? 'Cannot reach the AI service. Please try again.' : e.message; }
@@ -22,6 +24,10 @@ function setBusy(value, text = '') {
   $('#build').disabled = value || !studio;
   document.querySelectorAll('.open-studio, .retry-render').forEach(button => { button.disabled = value; });
   $('#new-chat').disabled = value;
+  studio?.setEnabled(!value);
+  for (const id of ['exit-studio', 'reset', 'ratio', 'object-select']) $(`#${id}`).disabled = value;
+  $('#object-height').disabled = value || !selectedObject;
+  $('#object-scale').disabled = value || !selectedObject;
   $('#status').textContent = text;
   $('#status').setAttribute('aria-busy', String(value));
   updateShotControls();
@@ -74,10 +80,16 @@ function syncViewport() {
 window.visualViewport?.addEventListener('resize', syncViewport);
 window.visualViewport?.addEventListener('scroll', syncViewport); syncViewport();
 function updateShotControls() {
-  $('#capture').disabled = busy || !current || shots.length >= 4;
+  $('#capture').disabled = busy || Boolean(pendingAddition) || !current || shots.length >= 4;
   $('#render').disabled = busy || freePhotoAvailable === false || !shots.some(shot => !shot.photo);
   $('#shot-count').textContent = `${shots.length} / 4 frames`;
-  $('#studio-hint').textContent = freePhotoAvailable === false ? 'Free photo generation is unavailable. Check Account for updates.' : !shots.length ? 'Capture a frame to get started.' : shots.length === 4 ? 'Four frames. Ready when you are.' : `${shots.length} frame${shots.length === 1 ? '' : 's'} ready. Add more or let’s go.`;
+  $('#studio-hint').textContent = pendingAddition ? 'Regenerate your new element before capturing a frame.' : freePhotoAvailable === false ? 'Free photo generation is unavailable. Check Account for updates.' : !shots.length ? 'Capture a frame to get started.' : shots.length === 4 ? 'Four frames. Ready when you are.' : `${shots.length} frame${shots.length === 1 ? '' : 's'} ready. Add more or let’s go.`;
+  $('#add-element').disabled = busy || Boolean(pendingAddition);
+  $('#regenerate').disabled = busy;
+  $('#cancel-addition').disabled = busy && !useOpenRouter;
+  $('#cancel-addition').setAttribute('aria-label', busy ? 'Stop regeneration' : 'Remove placeholder');
+  $('#addition-controls').hidden = !pendingAddition;
+  $('#addition-name').textContent = pendingAddition?.description || '';
 }
 async function refreshFreeAvailability() {
   if (!useOpenRouter) return;
@@ -93,8 +105,9 @@ async function refreshFreeAvailability() {
   } finally { $('#refresh-models').disabled = false; updateShotControls(); }
 }
 function closeStudio() {
-  if (activeTurn && !$('#studio-panel').hidden) { activeTurn.view = studio.capture(); activeTurn.shots = shots; }
-  $('#studio-panel').hidden = true; $('#notes-panel').hidden = true;
+  if (busy) return;
+  if (activeTurn && !$('#studio-panel').hidden) { activeTurn.view = studio.capture(); activeTurn.shots = shots; Object.assign(activeTurn, current); activeTurn.addition = pendingAddition; }
+  $('#studio-panel').hidden = true; $('#notes-panel').hidden = true; $('#element-form').hidden = true;
   $('#toast').classList.remove('show');
   $('#app').inert = false; document.body.style.overflow = ''; studio?.setActive(false);
   activeTurn?.button.focus({ preventScroll: true });
@@ -192,44 +205,92 @@ async function api(path, payload, options = {}) {
 }
 try {
   studio = createStudio($('#canvas-wrap'), $('#ratio'), (selection, canUndo) => {
+    selectedObject = selection;
     $('#object-select').value = selection ? String(selection.index) : '';
-    $('#object-height').disabled = !selection;
+    $('#object-height').disabled = busy || !selection; $('#object-scale').disabled = busy || !selection;
     if (selection) {
       $('#object-height').min = Math.min(0, selection.height);
       $('#object-height').max = Math.max(10, Math.ceil(selection.height));
       $('#object-height').value = selection.height;
+      $('#object-scale').value = selection.scale;
     }
-    $('#undo-move').disabled = !canUndo;
+    $('#undo-move').disabled = busy || !canUndo;
   });
 } catch { $('#webgl-error').hidden = false; }
 function populateObjects() {
-  $('#object-select').replaceChildren(new Option('Tap an object to move it', ''));
+  $('#object-select').replaceChildren(new Option('Select an object', ''));
   for (const object of studio.getObjects()) $('#object-select').add(new Option(object.name, String(object.index)));
 }
-function mode(move) {
-  $('#move-mode').setAttribute('aria-pressed', String(move)); $('#camera-mode').setAttribute('aria-pressed', String(!move));
-  $('#object-controls').hidden = !move;
-  $('#gesture-hint').textContent = move ? 'Tap an object and drag · Use Height to lift it' : 'Drag to orbit · Pinch to zoom · Two fingers to pan';
-  studio.setMoveMode(move); studio.resize();
-}
-$('#camera-mode').onclick = () => mode(false); $('#move-mode').onclick = () => mode(true);
 $('#object-select').onchange = event => studio.selectObject(event.target.value === '' ? null : Number(event.target.value));
 $('#object-height').oninput = event => studio.setHeight(Number(event.target.value));
+$('#object-scale').oninput = event => studio.setScale(Number(event.target.value));
 $('#undo-move').onclick = () => studio.undoMove();
 $('#reset').onclick = () => studio?.reset(); $('#ratio').onchange = () => studio?.resize();
 function openStudio(turn) {
   if (!turn || busy) return;
   activeTurn = turn; current = { prompt: turn.prompt, reference: turn.reference }; shots = turn.shots;
-  studio.restore(turn.view); populateObjects(); mode(false); activeShot = null; notes = '';
+  pendingAddition = turn.addition || null;
+  studio.restore(turn.view); populateObjects(); activeShot = null; notes = '';
+  $('#studio-error').hidden = true; $('#addition-status').textContent = 'Move and resize the placeholder, then regenerate.';
   $('#frame-note').value = ''; $('#note-label').textContent = 'Add note'; $('#scene-name').textContent = turn.title; updateShots();
   $('#studio-panel').hidden = false; $('#app').inert = true; document.body.style.overflow = 'hidden';
   studio.setActive(true); $('#exit-studio').focus({ preventScroll: true });
 }
 $('#exit-studio').onclick = closeStudio;
+function studioError(text = '') { $('#studio-error').textContent = text; $('#studio-error').hidden = !text; }
+$('#add-element').onclick = () => {
+  if (busy || pendingAddition) return;
+  studioError(); $('#element-form').hidden = false; $('#element-description').focus();
+};
+$('#close-element').onclick = () => { $('#element-form').hidden = true; $('#add-element').focus(); };
+$('#element-form').onsubmit = event => {
+  event.preventDefault(); if (busy || pendingAddition) return;
+  try {
+    const description = $('#element-description').value.trim();
+    if (`${current.prompt}\nAlso include: ${description}`.length > 4000) throw new Error('This scene description is full. Start a new scene to add more elements.');
+    const view = studio.capture(), result = addNode(view.scene, description, view.target);
+    studio.replaceScene(result.scene); pendingAddition = result.addition; activeTurn.addition = pendingAddition; activeShot = null;
+    populateObjects(); studio.selectObject(studio.getObjects().find(o => o.name === pendingAddition.group).index);
+    $('#element-form').hidden = true; $('#element-description').value = ''; studioError();
+    $('#addition-status').textContent = 'Move and resize the placeholder, then regenerate.';
+    updateShotControls(); $('#regenerate').focus();
+  } catch (e) { studioError(message(e)); }
+};
+$('#cancel-addition').onclick = () => {
+  if (busy) { additionController?.abort(); return; }
+  if (!pendingAddition) return;
+  const scene = studio.snapshot(); scene.objects = scene.objects.filter(o => o.group !== pendingAddition.group);
+  studio.replaceScene(scene); pendingAddition = null; activeTurn.addition = null;
+  populateObjects(); updateShotControls(); studioError(); $('#add-element').focus();
+};
+$('#regenerate').onclick = async () => {
+  if (busy || !pendingAddition) return;
+  const addition = { ...pendingAddition }, before = studio.snapshot();
+  additionController = new AbortController(); studioError(); setBusy(true, 'Adding your element…');
+  $('#addition-status').textContent = 'Creating your new element…';
+  try {
+    const data = await api('scene', { prompt: additionBrief(before, addition) }, {
+      signal: additionController.signal,
+      onProgress: text => { $('#addition-status').textContent = text; },
+    });
+    if (additionController.signal.aborted) throw new Error('Regeneration stopped. Your placeholder is ready to try again.');
+    const next = mergeAddition(before, data.scene, addition);
+    studio.replaceScene(next); current = { ...current, prompt: `${current.prompt}\nAlso include: ${addition.description}` };
+    Object.assign(activeTurn, current); pendingAddition = null; activeTurn.addition = null;
+    activeTurn.view = studio.capture();
+    activeTurn.button.closest('.scene-card').querySelector('.scene-preview').src = activeTurn.view.composition;
+    populateObjects(); studio.selectObject(studio.getObjects().find(o => o.name === addition.group).index);
+    toast('Element added. Your composition is ready.');
+  } catch (e) {
+    studioError(additionController.signal.aborted ? 'Regeneration stopped. Your placeholder is ready to try again.' : message(e));
+    $('#addition-status').textContent = 'Your scene is unchanged. Try Regenerate again.';
+  } finally { additionController = null; setBusy(false); }
+};
 // Keep keyboard navigation inside the full-screen studio, including its note sheet.
 $('#studio-panel').addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     if (!$('#notes-panel').hidden) { $('#notes-panel').hidden = true; $('#annotate').focus(); }
+    else if (!$('#element-form').hidden) { $('#element-form').hidden = true; $('#add-element').focus(); }
     else closeStudio();
   }
   if (event.key === 'Tab') {
@@ -270,7 +331,7 @@ $('#brief-form').onsubmit = async event => {
     });
     // Each response retains its own scene and frames when another message is sent.
     if (activeTurn) activeTurn.shots = shots;
-    studio.setScene(data.scene); current = { prompt, reference: sceneReference };
+    studio.setScene(data.scene); current = { prompt, reference: sceneReference }; pendingAddition = null;
     shots = []; notes = ''; activeShot = null; $('#frame-note').value = ''; $('#note-label').textContent = 'Add note';
     for (const id of ['scene-card', 'scene-preview', 'card-title', 'enter-studio']) document.getElementById(id)?.removeAttribute('id');
     const node = $('#scene-template').content.firstElementChild.cloneNode(true), card = node.querySelector('.scene-card');
@@ -280,7 +341,7 @@ $('#brief-form').onsubmit = async event => {
     activeTurn = { ...current, title: data.scene.title, view, shots, button };
     const turn = activeTurn; button.onclick = () => openStudio(turn);
     pending.replaceWith(node); iconify();
-    populateObjects(); mode(false); updateShots();
+    populateObjects(); updateShots();
     scrollChat();
   } catch (e) {
     pending.classList.add('message-failed'); pending.replaceChildren();
@@ -304,7 +365,7 @@ function updateShots() {
     const view = document.createElement('button'); view.className = 'frame-image'; view.setAttribute('aria-label', `Restore frame ${index + 1}`);
     const image = document.createElement('img'); image.src = shot.composition; image.alt = `Composition ${index + 1}`; view.append(image);
     view.onclick = () => {
-      if (busy) return;
+      if (busy || pendingAddition) { if (pendingAddition) toast('Finish or remove your new element first.'); return; }
       studio.restore(shot); current = { prompt: shot.prompt, reference: shot.reference };
       populateObjects(); activeShot = shot.id; notes = shot.notes; $('#frame-note').value = notes;
       $('#note-label').textContent = notes ? 'Edit note' : 'Add note'; updateShots();
@@ -330,7 +391,7 @@ $('#frame-note').oninput = event => {
 };
 $('#close-notes').onclick = () => { $('#notes-panel').hidden = true; $('#annotate').focus(); };
 $('#capture').onclick = () => {
-  if (busy || !current || shots.length >= 4) return;
+  if (busy || pendingAddition || !current || shots.length >= 4) return;
   shots.push({ id: ++shotId, ...current, ...studio.capture(), notes, photo: null });
   activeShot = null; notes = ''; $('#frame-note').value = ''; $('#note-label').textContent = 'Add note';
   updateShots(); $('#flash').classList.remove('fire'); void $('#flash').offsetWidth; $('#flash').classList.add('fire'); toast(`Frame ${shots.length} captured.`);
@@ -421,7 +482,7 @@ $('.composer').ondragover = event => event.preventDefault(); $('.composer').ondr
 $('#remove-reference').onclick = clearReference;
 function resetChat() {
   if (busy) return;
-  closeStudio(); current = null; activeTurn = null; shots = []; shotId = 0; resultOrdinal = 0; activeShot = null; notes = '';
+  closeStudio(); current = null; activeTurn = null; shots = []; shotId = 0; resultOrdinal = 0; activeShot = null; notes = ''; pendingAddition = null;
   $('#chat-thread').replaceChildren(); $('#chat-intro').hidden = false;
   $('#prompt').value = ''; resizeComposer(); clearReference(); error(); updateShots(); setBusy(false);
   $('#new-chat-dialog').close(); $('#prompt').focus();
