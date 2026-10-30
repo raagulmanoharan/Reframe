@@ -4,7 +4,9 @@ A mobile-first chat and 3D camera for AI image generation. Send a description, a
 
 ## OpenRouter free models (default)
 
-The default app on GitHub Pages and new Render builds uses **OpenRouter**. Open **Account**, enter your own OpenRouter API key, and send a prompt or photo. Create or replace keys at [OpenRouter](https://openrouter.ai/settings/keys). The key is held only in tab memory and sent directly to OpenRouter over HTTPS; it is never bundled, logged, persisted, or sent to Reframe's server.
+The default app on GitHub Pages and new Render builds uses **OpenRouter**. Open **Account → Continue with OpenRouter**, sign in and authorize Reframe in the OpenRouter window, then return to the app. You can also send your first prompt and sign in when asked; the request resumes after connection. **Use an API key instead** remains available as an optional alternative.
+
+Sign-in uses OpenRouter’s authorization-code exchange with S256 PKCE and a random callback state. A dedicated `auth.html` return page works at both the site root and the GitHub Pages `/Reframe/` path. The generated app-specific key and PKCE verifier stay only in tab memory; no localStorage, sessionStorage, or backend credential storage is used. **Disconnect** or reload clears the key from Reframe without clearing the conversation on disconnect. To revoke the provider-side key, use [OpenRouter settings](https://openrouter.ai/settings/keys). Sign-in opens a separate window or tab so the current chat, attachments and studio frames remain intact; allow that window if your browser blocks it.
 
 Reframe checks OpenRouter's current model catalog in the browser. It selects a concrete `:free` model only when all listed prices are zero and no conditional pricing is present. Requests disable provider fallback and specify zero maximum prompt, completion, image and request prices. The app does not use paid fallbacks or promotional discounts. Free-provider availability, account settings and usage limits still apply.
 
@@ -15,7 +17,7 @@ The two stages have separate capability requirements:
 
 **A compatible free image-generation model is not guaranteed to exist.** The app checks this upfront, reports unavailable photo generation, and preserves the studio frames. Account → **Refresh availability** checks again. The app does not claim the complete workflow is free unless compatible models are available for both stages.
 
-The live catalog and generation endpoint were blocked from the development workspace. The integration is verified with the official OpenRouter SDK's request/response definitions and fixture tests; live model availability, quality and account entitlement remain unverified. No real user key is included in the repository.
+The live catalog and generation endpoint were blocked from the development workspace. The integration is verified with the official OpenRouter SDK's request/response definitions and fixture tests; live authorization, model availability, quality and account entitlement remain unverified. The authorization tests simulate OpenRouter’s redirect and key exchange; physical iOS sign-in still needs a device trial. No real user key is included in the repository.
 
 ## Deploy on Render
 
@@ -86,7 +88,7 @@ npm run test:openrouter
 npm run build
 ```
 
-OpenRouter tests check free-price guards, modality selection, ordered composition/reference inputs, provider failures, chat rendering, downloads, unavailable free photo generation and recovery. Unit tests also check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
+OpenRouter tests check PKCE/state validation, callback delivery, pending-request continuation, cancellation, popup blocking, disconnect, free-price guards, modality selection, ordered composition/reference inputs, provider failures, chat rendering, downloads, unavailable free photo generation and recovery. Unit tests also check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
 
 Playwright uses `/usr/bin/chromium` by default; set `CHROMIUM_PATH` if needed. Tests start Vite automatically. Physical multitouch ergonomics still need a device trial.
 

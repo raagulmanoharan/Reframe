@@ -3,6 +3,7 @@ import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, R
 import { createStudio } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
 import * as openrouter from './openrouter.js';
+import { startOpenRouterLogin } from './openrouter-auth.js';
 import { setupChatGPT } from './chatgpt.js';
 const icons = { CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, Move, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box };
 const $ = selector => document.querySelector(selector);
@@ -10,7 +11,7 @@ const iconify = () => createIcons({ icons });
 const aiMode = import.meta.env.VITE_AI_MODE || 'openrouter';
 const hosted = aiMode === 'chatgpt';
 const useOpenRouter = aiMode === 'openrouter';
-let freePhotoAvailable = null;
+let freePhotoAvailable = null, loginAttempt = null;
 let current = null, shots = [], shotId = 0, reference = null, studio, busy = false, activeTurn = null, resultOrdinal = 0;
 let timer, accessCode = '', resolveCode, activeShot = null, notes = '', loggedIn = false;
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('show'); clearTimeout(timer); timer = setTimeout(() => $('#toast').classList.remove('show'), 3500); }
@@ -120,21 +121,62 @@ if (hosted) {
   $('#conversation').hidden = false;
   if (useOpenRouter) {
     $('#access-form h2').textContent = 'Connect OpenRouter';
-    $('#access-form > p').textContent = 'Use an OpenRouter API key. Reframe selects only free model variants and never falls back to a paid model. Free models have usage limits and may be unavailable. Your key stays in this tab.';
+    $('#access-form > p').textContent = 'Sign in to OpenRouter and authorize Reframe. Your connection lasts for this tab. Free models have usage limits and may be unavailable.';
     $('#access-form label').textContent = 'OpenRouter API key';
     $('#openrouter-settings').hidden = false;
-    $('#privacy-note').textContent = 'Your OpenRouter key stays in tab memory. Prompts and images go directly to OpenRouter and the selected model provider. Their data policies and free usage limits apply.';
+    $('#openrouter-login').hidden = false;
+    const manual = document.createElement('details'); manual.className = 'manual-key-details';
+    const summary = document.createElement('summary'); summary.textContent = 'Use an API key instead'; manual.append(summary);
+    $('#manual-key-entry').before(manual); manual.append($('#manual-key-entry'), $('#save-access-key'));
+    $('#manual-key-entry').append($('#openrouter-settings a'));
+    $('#save-access-key').style.marginTop = '12px';
+    $('#forget-key').hidden = true;
+    $('#cancel-access').textContent = 'Close';
+    $('#openrouter-sign-in').onclick = async () => {
+      if (loginAttempt) return;
+      const attempt = startOpenRouterLogin(); loginAttempt = attempt;
+      $('#openrouter-sign-in').disabled = true;
+      $('#openrouter-login-status').textContent = 'Finish signing in with OpenRouter, then return here. Close this dialog to cancel.';
+      try {
+        const key = await attempt.promise;
+        if (loginAttempt !== attempt) return;
+        acceptKey(key); toast('Connected to OpenRouter.');
+      } catch (e) {
+        if (loginAttempt === attempt) $('#openrouter-login-status').textContent = message(e);
+      } finally {
+        if (loginAttempt === attempt) loginAttempt = null;
+        $('#openrouter-sign-in').disabled = false;
+      }
+    };
+    $('#openrouter-disconnect').onclick = () => {
+      accessCode = ''; $('#access-code').value = ''; updateOpenRouterAccount();
+      $('#openrouter-login-status').textContent = 'Disconnected from this tab.';
+    };
+    $('#privacy-note').textContent = 'OpenRouter sign-in authorizes an app-specific key, kept only in tab memory. Disconnect or reload clears it here; you can revoke it in OpenRouter settings. Prompts and images go to OpenRouter and the selected provider; their data policies and usage limits apply.';
     $('#refresh-models').onclick = refreshFreeAvailability;
   }
   $('#access-form').onsubmit = event => {
-    event.preventDefault(); accessCode = $('#access-code').value.trim(); if (!accessCode) return;
-    $('#access-code').value = ''; const resolve = resolveCode; resolveCode = null;
-    $('#access-dialog').close(); resolve?.(accessCode);
+    event.preventDefault(); const key = $('#access-code').value.trim(); if (key) acceptKey(key);
   };
-  $('#access-dialog').addEventListener('close', () => { resolveCode?.(null); resolveCode = null; });
+  $('#access-dialog').addEventListener('close', () => {
+    const attempt = loginAttempt; loginAttempt = null; attempt?.cancel();
+    if (useOpenRouter && attempt && !accessCode) $('#openrouter-login-status').textContent = 'Sign-in cancelled. You can try again.';
+    resolveCode?.(null); resolveCode = null;
+  });
   $('#cancel-access').onclick = () => $('#access-dialog').close();
   $('#access-settings').onclick = () => $('#access-dialog').showModal();
   $('#forget-key').onclick = () => { accessCode = ''; $('#access-code').value = ''; $('#access-dialog').close(); toast('API key removed.'); };
+}
+function updateOpenRouterAccount() {
+  if (!useOpenRouter) return;
+  $('#openrouter-sign-in').hidden = Boolean(accessCode); $('#openrouter-disconnect').hidden = !accessCode;
+  $('#account-label').textContent = accessCode ? 'Connected to OpenRouter' : 'Account';
+  $('#openrouter-login-status').textContent = accessCode ? 'Connected to OpenRouter for this tab.' : '';
+}
+function acceptKey(key) {
+  accessCode = key; $('#access-code').value = ''; updateOpenRouterAccount();
+  const resolve = resolveCode; resolveCode = null;
+  $('#access-dialog').close(); resolve?.(key);
 }
 async function api(path, payload) {
   if (chatgpt) return chatgpt(path, payload);
@@ -145,7 +187,7 @@ async function api(path, payload) {
   }
   const provider = useOpenRouter ? openrouter : { generateScene, generatePhoto };
   try { return await (path === 'scene' ? provider.generateScene(accessCode, payload) : provider.generatePhoto(accessCode, payload)); }
-  catch (e) { if (e.status === 401) accessCode = ''; throw e; }
+  catch (e) { if (e.status === 401) { accessCode = ''; updateOpenRouterAccount(); } throw e; }
 }
 try {
   studio = createStudio($('#canvas-wrap'), $('#ratio'), (selection, canUndo) => {

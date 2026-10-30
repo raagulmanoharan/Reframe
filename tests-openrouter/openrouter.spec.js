@@ -4,6 +4,7 @@ const scene = JSON.parse(readFileSync(new URL('../tests/fixtures/scene.json', im
 const model = { id: 'fixture/vision:free', pricing: { prompt: '0', completion: '0' }, architecture: { input_modalities: ['text', 'image'], output_modalities: ['text'] }, supported_parameters: ['structured_outputs'] };
 const photo = { ...model, id: 'fixture/photo:free', architecture: { input_modalities: ['text', 'image'], output_modalities: ['image'] } };
 async function connect(page) {
+  await page.getByText('Use an API key instead', { exact: true }).click();
   await page.locator('#access-code').fill('fixture-key'); await page.getByRole('button', { name: 'Continue', exact: true }).click();
 }
 test('OpenRouter chat uses only free models, submits the studio composition and downloads the returned photo', async ({ page }) => {

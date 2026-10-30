@@ -110,3 +110,12 @@ dialog { color: var(--ink); border: 1px solid #fff; border-radius: 28px; backgro
 .provider-notice { margin: 0 4px 10px; color: #686973; font-size: 11px; line-height: 1.5; text-align: center; }
 #provider-availability { overflow-wrap: anywhere; font-size: 12px; }
 #openrouter-settings a { display: inline-block; color: #434956; font-size: 12px; padding: 12px; }
+
+#openrouter-sign-in { width: 100%; margin: 8px 0; }
+#openrouter-login-status { min-height: 20px; }
+.manual-key-details { margin: 16px 0; border-top: 1px solid var(--line); padding-top: 14px; }
+.manual-key-details summary { cursor: pointer; font-size: 12px; color: #727580; padding: 6px 0; }
+.auth-return { max-width: 440px; margin: 15vh auto; padding: 24px; text-align: center; }
+.auth-return h1 { font-size: 28px; }.auth-return p { color: #727580; line-height: 1.6; }.auth-return a { color: #343a46; }
+
+.manual-key-details a { display: block; color: #434956; font-size: 12px; padding-top: 14px; }

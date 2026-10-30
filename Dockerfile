@@ -8,7 +8,7 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then \
       NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca npm ci --strict-ssl=true; \
     else npm ci --strict-ssl=true; fi
-COPY index.html vite.config.js ./
+COPY index.html auth.html vite.config.js ./
 COPY src ./src
 COPY lib ./lib
 ARG VITE_AI_MODE=openrouter
