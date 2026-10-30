@@ -39,18 +39,49 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
   let composer, bokeh, composerSize = '', cameraNotice = '';
   controls.addEventListener('change', () => { needsRender = true; });
   const touches = new Map();
-  let handingOff = false;
+  const ownedPointers = new Set();
+  let candidate = null;
   let meshes = [], entities = [];
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  const highlight = new THREE.BoxHelper(new THREE.Object3D(), 0x9b742e);
-  highlight.visible = false; scene.add(highlight);
+  const selectionFrame = document.createElement('div'); selectionFrame.className = 'selection-frame'; selectionFrame.hidden = true;
+  for (const [edge, label] of Object.entries({ nw: 'top left', n: 'top', ne: 'top right', e: 'right', se: 'bottom right', s: 'bottom', sw: 'bottom left', w: 'left' })) {
+    const handle = document.createElement('button'); handle.type = 'button'; handle.className = 'resize-handle'; handle.dataset.resize = edge;
+    handle.setAttribute('aria-label', `Resize selected object from ${label}`); handle.title = 'Drag to resize';
+    handle.onkeydown = event => {
+      if (!enabled || selected === null || drag || !['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].includes(event.key)) return;
+      event.preventDefault(); event.stopPropagation();
+      setScale(entities[selected].node.scale.x + (['ArrowUp', 'ArrowRight'].includes(event.key) ? 0.05 : -0.05));
+    };
+    selectionFrame.append(handle);
+  }
+  surface.append(selectionFrame);
+  function updateSelectionFrame() {
+    selectionFrame.hidden = !active || !enabled || selected === null;
+    if (selectionFrame.hidden) return;
+    camera.updateMatrixWorld();
+    const box = new THREE.Box3().setFromObject(entities[selected].node), projected = [];
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+      const point = new THREE.Vector3(x, y, z);
+      if (point.clone().applyMatrix4(camera.matrixWorldInverse).z >= -camera.near) { selectionFrame.hidden = true; return; }
+      projected.push(point.project(camera));
+    }
+    const canvas = renderer.domElement.getBoundingClientRect(), bounds = surface.getBoundingClientRect();
+    const xs = projected.map(p => canvas.left - bounds.left + (p.x + 1) * canvas.width / 2);
+    const ys = projected.map(p => canvas.top - bounds.top + (1 - p.y) * canvas.height / 2);
+    const left = Math.max(18, Math.min(...xs) - 6), right = Math.min(bounds.width - 18, Math.max(...xs) + 6);
+    const top = Math.max(18, Math.min(...ys) - 6), bottom = Math.min(bounds.height - 18, Math.max(...ys) + 6);
+    if (right - left < 16 || bottom - top < 16) { selectionFrame.hidden = true; return; }
+    Object.assign(selectionFrame.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px` });
+  }
   function selectionChanged() {
     needsRender = true;
-    if (selected !== null) highlight.setFromObject(entities[selected].node);
-    highlight.visible = selected !== null;
+    updateSelectionFrame();
     onSelection(selected === null ? null : { index: selected, name: entities[selected].name, height: entities[selected].node.position.y, scale: entities[selected].node.scale.x }, undo.length > 0);
   }
   function selectObject(index) {
+    // A second finger can change the selection using the object list. Consume
+    // the old pointer until release without letting it edit the new selection.
+    drag = null; candidate = null;
     selected = Number.isInteger(index) && entities[index] ? index : null;
     selectionChanged();
   }
@@ -80,17 +111,23 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
       entity.node.position[axis] = THREE.MathUtils.clamp(entity.node.position[axis], -25 - Math.min(...offsets), 25 - Math.max(...offsets));
     });
   }
-  function setScale(value) {
+  function setScale(value, remember = true) {
     if (selected === null || !Number.isFinite(value)) return;
     const entity = entities[selected], dimensions = entity.sizes.flat();
     const span = Math.max(...[0, 1, 2].map(axis => Math.max(...entity.positions.map(p => p[axis])) - Math.min(...entity.positions.map(p => p[axis]))));
     const min = Math.max(0.1, 0.01 / Math.min(...dimensions));
     const max = Math.min(5, 30 / Math.max(...dimensions), span ? 50 / span : 5);
-    rememberMove(); entity.node.scale.setScalar(THREE.MathUtils.clamp(value, min, max)); clampPosition(entity); commitPosition();
+    const next = THREE.MathUtils.clamp(value, min, max);
+    if (next === entity.node.scale.x) return;
+    if (remember) rememberMove();
+    const bottom = new THREE.Box3().setFromObject(entity.node).min.y;
+    entity.node.scale.setScalar(next);
+    entity.node.position.y += bottom - new THREE.Box3().setFromObject(entity.node).min.y;
+    clampPosition(entity); commitPosition();
   }
   function undoMove() {
     const previous = undo.pop(); if (!previous) return;
-    selected = previous.index; entities[selected].node.position.fromArray(previous.position); entities[selected].node.scale.setScalar(previous.scale); commitPosition();
+    selectObject(previous.index); entities[selected].node.position.fromArray(previous.position); entities[selected].node.scale.setScalar(previous.scale); commitPosition();
   }
   function stopCameraMotion() {
     controls.enableDamping = false; controls.update(); controls.enableDamping = true;
@@ -135,6 +172,7 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
   }
   function renderView(fullResolution = false) {
     cameraChanged();
+    updateSelectionFrame();
     if (!lens.blur) { renderer.render(scene, camera); needsRender = false; return; }
     if (!composer) {
       composer = new EffectComposer(renderer);
@@ -157,63 +195,112 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
     pointer.set((event.clientX - bounds.left) / bounds.width * 2 - 1, -(event.clientY - bounds.top) / bounds.height * 2 + 1);
     raycaster.setFromCamera(pointer, camera);
   }
+  function hitObject(event) {
+    const bounds = renderer.domElement.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) return null;
+    camera.updateMatrixWorld(); world.updateMatrixWorld(true); cast(event);
+    return raycaster.intersectObjects(meshes, false)[0] || null;
+  }
+  function ownPointer(event) {
+    ownedPointers.add(event.pointerId); controls.enabled = false;
+    event.stopImmediatePropagation(); event.preventDefault(); surface.setPointerCapture(event.pointerId);
+  }
+  function beginEdit() { if (!drag.moved) { rememberMove(); drag.moved = true; } }
+  function endInteraction() { drag = null; candidate = null; controls.enabled = enabled; surface.style.cursor = 'grab'; selectionChanged(); }
   surface.addEventListener('pointerdown', event => {
-    if (handingOff) return;
     if (!enabled) { event.stopImmediatePropagation(); return; }
     if (event.pointerType === 'touch') {
-      touches.set(event.pointerId, { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY });
+      touches.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
       if (touches.size > 1) {
-        // Hand the first finger to OrbitControls too, so pinch/pan works even
-        // when the gesture began on an object. Do not move the object again.
+        candidate = null;
         if (drag) {
-          const first = touches.get(drag.pointerId); drag = null; controls.enabled = true;
-          handingOff = true;
-          try { surface.dispatchEvent(new PointerEvent('pointerdown', { ...first, pointerType: 'touch', button: 0, bubbles: true })); }
-          finally { handingOff = false; }
+          ownPointer(event);
+          if (drag.kind !== 'pinch') {
+            const ids = [...touches.keys()].slice(0, 2), [a, b] = ids.map(id => touches.get(id));
+            drag = { kind: 'pinch', ids, moved: drag.moved, distance: Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)), scale: entities[selected].node.scale.x };
+          }
         }
+        // A gesture that started off the selection belongs to the camera.
         return;
       }
     }
     if (event.button !== 0 || drag) return;
-    const bounds = renderer.domElement.getBoundingClientRect();
-    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) { selectObject(null); return; }
-    cast(event);
-    const hit = raycaster.intersectObjects(meshes, false)[0];
-    if (!hit) { selectObject(null); return; }
-    event.stopImmediatePropagation(); event.preventDefault(); stopCameraMotion(); controls.enabled = false;
-    selectObject(hit.object.userData.groupIndex);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.point.y);
-    const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
-    if (!point) { controls.enabled = true; return; }
-    drag = { pointerId: event.pointerId, plane, offset: entities[selected].node.position.clone().sub(point), x: event.clientX, y: event.clientY, moved: false, focusPoint: hit.point.clone() };
-    surface.setPointerCapture(event.pointerId);
-    container.style.cursor = 'grabbing';
+    stopCameraMotion();
+    const handle = event.target.closest?.('.resize-handle');
+    if (handle && selectionFrame.contains(handle) && selected !== null) {
+      const bounds = selectionFrame.getBoundingClientRect(), edge = handle.dataset.resize;
+      ownPointer(event); candidate = null; handle.focus({ preventScroll: true });
+      drag = { kind: 'resize', pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false, scale: entities[selected].node.scale.x,
+        vx: /[ew]/.test(edge) ? event.clientX - bounds.x - bounds.width / 2 : 0,
+        vy: /[ns]/.test(edge) ? event.clientY - bounds.y - bounds.height / 2 : 0 };
+      return;
+    }
+    const hit = hitObject(event), index = hit?.object.userData.groupIndex;
+    if (hit && index === selected) {
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.point.y);
+      const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+      if (!point) return;
+      ownPointer(event); candidate = null;
+      drag = { kind: 'move', pointerId: event.pointerId, plane, offset: entities[selected].node.position.clone().sub(point), x: event.clientX, y: event.clientY, moved: false, focusPoint: hit.point.clone() };
+      surface.style.cursor = 'grabbing';
+      return;
+    }
+    // Let OrbitControls own this pointer. Only a release without a drag selects.
+    candidate = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, index, moved: false };
   }, true);
   surface.addEventListener('pointermove', event => {
-    if (touches.has(event.pointerId)) touches.set(event.pointerId, { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY });
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    event.stopImmediatePropagation(); cast(event);
-    if (!drag.moved) {
-      if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 4) return;
-      rememberMove(); drag.moved = true;
+    if (touches.has(event.pointerId)) touches.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+    if (ownedPointers.has(event.pointerId)) {
+      event.stopImmediatePropagation();
+      if (!drag || !enabled) return;
+      if (drag.kind === 'pinch') {
+        const [a, b] = drag.ids.map(id => touches.get(id)); if (!a || !b) return;
+        const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        if (!drag.moved && Math.abs(distance - drag.distance) < 3) return;
+        beginEdit(); setScale(drag.scale * distance / drag.distance, false); return;
+      }
+      if (event.pointerId !== drag.pointerId) return;
+      if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 4) return;
+      beginEdit();
+      if (drag.kind === 'resize') {
+        const ratio = 1 + ((event.clientX - drag.x) * drag.vx + (event.clientY - drag.y) * drag.vy) / Math.max(100, drag.vx ** 2 + drag.vy ** 2);
+        setScale(drag.scale * ratio, false); return;
+      }
+      cast(event); const point = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3()); if (!point) return;
+      point.add(drag.offset); const entity = entities[selected];
+      entity.node.position.x = point.x; entity.node.position.z = point.z; clampPosition(entity); commitPosition();
+      return;
     }
-    const point = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
-    if (!point) return;
-    point.add(drag.offset);
-    const entity = entities[selected];
-    entity.node.position.x = point.x; entity.node.position.z = point.z; clampPosition(entity);
-    commitPosition();
+    if (candidate?.pointerId === event.pointerId && !candidate.moved) {
+      if (Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < 4) { event.stopImmediatePropagation(); return; }
+      candidate.moved = true;
+    }
+    if (event.pointerType === 'mouse' && !event.buttons) {
+      const hit = hitObject(event); surface.style.cursor = hit && hit.object.userData.groupIndex === selected ? 'move' : 'grab';
+    }
   }, true);
   const release = event => {
     touches.delete(event.pointerId);
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    if (!drag.moved && event.type === 'pointerup') focusOn(drag.focusPoint, entities[selected]);
-    event.stopImmediatePropagation(); drag = null; controls.enabled = enabled; container.style.cursor = 'grab';
-    if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
-    selectionChanged();
+    if (ownedPointers.has(event.pointerId)) {
+      event.stopImmediatePropagation(); ownedPointers.delete(event.pointerId);
+      if (drag?.kind === 'move' && !drag.moved && event.type === 'pointerup') focusOn(drag.focusPoint, entities[selected]);
+      if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
+      // Consume the remaining finger after a pinch so it cannot jump into a move.
+      if (!ownedPointers.size) endInteraction();
+      return;
+    }
+    if (candidate?.pointerId === event.pointerId) {
+      if (event.type === 'pointerup' && !candidate.moved && Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < 4) {
+        const hit = hitObject(event);
+        if (hit && hit.object.userData.groupIndex === candidate.index) { selectObject(candidate.index); focusOn(hit.point, entities[selected]); }
+        else if (!hit && candidate.index === undefined) selectObject(null);
+      }
+      candidate = null;
+    }
   };
   surface.addEventListener('pointerup', release, true);
   surface.addEventListener('pointercancel', release, true);
+  surface.addEventListener('lostpointercapture', event => { if (ownedPointers.has(event.pointerId)) release(event); }, true);
   const geometries = {
     box: () => new THREE.BoxGeometry(1, 1, 1),
     sphere: () => new THREE.SphereGeometry(0.5, 16, 10),
@@ -236,7 +323,7 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
     world.traverse(object => { if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); } });
     world.clear();
     // Edits never mutate the response card or an earlier captured frame.
-    layout = structuredClone(next); selected = null; meshes = []; undo = []; drag = null; controls.enabled = enabled;
+    layout = structuredClone(next); selected = null; meshes = []; undo = []; drag = null; candidate = null; controls.enabled = enabled;
     scene.background.set(next.background);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: next.floor, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = -0.02; floor.receiveShadow = true; world.add(floor);
@@ -267,16 +354,13 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
     stopCameraMotion();
     const size = new THREE.Vector2(); renderer.getSize(size);
     const pixelRatio = renderer.getPixelRatio(), aspect = camera.aspect;
-    const wasHighlighted = highlight.visible;
     try {
-      highlight.visible = false;
       const [w, h] = ratio.value.split(':').map(Number);
       const width = w >= h ? 1024 : Math.round(1024 * w / h), height = h >= w ? 1024 : Math.round(1024 * h / w);
       renderer.setPixelRatio(1); renderer.setSize(width, height, false);
       camera.aspect = w / h; camera.updateProjectionMatrix(); renderView(true);
       return { scene: structuredClone(layout), composition: renderer.domElement.toDataURL('image/jpeg', 0.88), position: camera.position.toArray(), target: controls.target.toArray(), ratio: ratio.value, lens: getLens() };
     } finally {
-      highlight.visible = wasHighlighted;
       renderer.setPixelRatio(pixelRatio); renderer.setSize(size.x, size.y, false);
       camera.aspect = aspect; camera.updateProjectionMatrix(); renderView();
     }
@@ -294,8 +378,8 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
   }
   return { setScene, replaceScene, reset, resize, capture, restore, selectObject, setHeight, setScale, undoMove, setZoom, setFocusDistance, setBlur, focusSelected, getLens,
     snapshot: () => structuredClone(layout),
-    setEnabled: value => { enabled = value; controls.enabled = value; if (!value) { stopCameraMotion(); drag = null; } selectionChanged(); },
+    setEnabled: value => { enabled = value; controls.enabled = value; if (!value) { stopCameraMotion(); drag = null; candidate = null; } selectionChanged(); },
     getObjects: () => entities.map((object, index) => ({ name: object.name, index })),
-    setActive: value => { active = value; if (value) resize(); },
+    setActive: value => { active = value; if (value) resize(); updateSelectionFrame(); },
   };
 }

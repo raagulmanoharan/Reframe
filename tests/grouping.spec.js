@@ -43,6 +43,7 @@ test('sofa parts move as one object, independently of the lamp, through capture,
   // Selecting either arm must resolve to Sofa, not the individual mesh.
   for (const position of [[-1.2, 0.9, 0.15], [1.2, 0.9, 0.15]]) {
     const point = await page.evaluate(position => window.groupTest.project(position), position);
+    await page.mouse.click(point.x, point.y);
     await page.mouse.move(point.x, point.y); await page.mouse.down();
     await page.mouse.move(point.x + 25, point.y + 10, { steps: 5 }); await page.mouse.up();
     expect(await page.evaluate(() => window.groupSelection.name)).toBe('Sofa');

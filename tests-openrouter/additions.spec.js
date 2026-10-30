@@ -31,8 +31,8 @@ test('a placed, resized node regenerates in the studio, keeps captured frames an
   await add(page);
   await expect(page.locator('#addition-controls')).toBeVisible(); await expect(page.locator('#capture')).toBeDisabled();
   await expect(page.locator('#object-select option')).toHaveText(['Select an object', 'Observatory', 'Boulder', 'Antenna', 'A brass floor lamp']);
-  await page.locator('#object-scale').evaluate(el => { el.value = '1.5'; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  await page.locator('#object-height').evaluate(el => { el.value = '2'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const handle = page.locator('.resize-handle[data-resize=se]'); await handle.focus();
+  for (let i = 0; i < 10; i++) await handle.press('ArrowUp');
   await page.screenshot({ path: '/tmp/reframe-node-mobile.png' });
   await page.locator('#exit-studio').click(); await page.locator('#enter-studio').click();
   await expect(page.locator('#addition-controls')).toBeVisible();

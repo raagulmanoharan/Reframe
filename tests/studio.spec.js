@@ -25,14 +25,15 @@ for (const mobile of [false, true]) test(`prompt → studio → four annotated f
   const panel = await page.locator('#studio-panel').boundingBox(); expect(panel.x).toBe(0); expect(panel.y).toBe(0); expect(panel.height).toBe(mobile ? 844 : 1000);
   await page.locator('#annotate').click(); await page.locator('#frame-note').fill('Warm light from the left. Keep the antenna.'); await page.locator('#close-notes').click();
   await page.locator('#capture').click(); const first = await page.locator('.frame-image img').first().getAttribute('src'); expect(first.length).toBeGreaterThan(10000);
-  // Move a whole object vertically, capture, then restore frame 1. Its original layout must survive.
+  // Resize a whole object, capture, then restore frame 1. Its original layout must survive.
   await page.locator('#object-select').selectOption('0');
-  const initialHeight = await page.locator('#object-height').inputValue();
-  await page.locator('#object-height').evaluate(el => { el.value = Number(el.value) + 1.5; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await expect(page.locator('#object-height, #object-scale')).toHaveCount(0);
+  const handle = page.locator('.resize-handle[data-resize=se]'); await handle.focus();
+  for (let i = 0; i < 10; i++) await handle.press('ArrowUp');
   await expect(page.locator('#undo-move')).toBeEnabled();
   await page.locator('#capture').click(); expect(await page.locator('.frame-image img').nth(1).getAttribute('src')).not.toBe(first);
   await page.getByRole('button', { name: 'Restore frame 1', exact: true }).click();
-  await page.locator('#object-select').selectOption('0'); expect(await page.locator('#object-height').inputValue()).toBe(initialHeight);
+  await expect(page.locator('.selection-frame')).toBeHidden();
   const bounds = await page.locator('canvas').boundingBox();
   await page.mouse.move(bounds.x + bounds.width * 0.1, bounds.y + bounds.height * 0.15); await page.mouse.down(); await page.mouse.move(bounds.x + bounds.width * 0.1 + 65, bounds.y + bounds.height * 0.15 + 20, { steps: 10 }); await page.mouse.up(); await page.waitForTimeout(300);
   await page.locator('#ratio').selectOption('9:16'); await page.locator('#capture').click();
@@ -128,6 +129,7 @@ test('object dragging changes the composition, undo restores it, and controls fi
   await page.goto('/'); await page.locator('#prompt').fill('An observatory'); await build(page);
   await page.locator('#capture').click(); const original = await page.locator('.frame-image img').first().getAttribute('src');
   const canvas = await page.locator('canvas').boundingBox();
+  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
   await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2); await page.mouse.down();
   await page.mouse.move(canvas.x + canvas.width / 2 + 35, canvas.y + canvas.height / 2 + 10, { steps: 8 }); await page.mouse.up();
   expect(await page.locator('#object-select').inputValue()).not.toBe('');

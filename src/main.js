@@ -15,7 +15,7 @@ const useOpenRouter = aiMode === 'openrouter';
 let freePhotoAvailable = null, loginAttempt = null;
 let current = null, shots = [], shotId = 0, reference = null, studio, busy = false, activeTurn = null, resultOrdinal = 0;
 let timer, accessCode = '', resolveCode, activeShot = null, notes = '', loggedIn = false;
-let pendingAddition = null, additionController = null, selectedObject = null;
+let pendingAddition = null, additionController = null;
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('show'); clearTimeout(timer); timer = setTimeout(() => $('#toast').classList.remove('show'), 3500); }
 function error(text = '') { $('#error').textContent = text; $('#error').hidden = !text; }
 function message(e) { return e.name === 'TimeoutError' ? 'Generation timed out. Please try again.' : e instanceof TypeError ? 'Cannot reach the AI service. Please try again.' : e.message; }
@@ -26,8 +26,6 @@ function setBusy(value, text = '') {
   $('#new-chat').disabled = value;
   studio?.setEnabled(!value);
   for (const id of ['exit-studio', 'reset', 'ratio', 'object-select', 'camera-zoom', 'camera-focus', 'camera-blur']) $(`#${id}`).disabled = value;
-  $('#object-height').disabled = value || !selectedObject;
-  $('#object-scale').disabled = value || !selectedObject;
   $('#status').textContent = text;
   $('#status').setAttribute('aria-busy', String(value));
   updateShotControls();
@@ -205,15 +203,8 @@ async function api(path, payload, options = {}) {
 }
 try {
   studio = createStudio($('#canvas-wrap'), $('#ratio'), (selection, canUndo) => {
-    selectedObject = selection;
     $('#object-select').value = selection ? String(selection.index) : '';
-    $('#object-height').disabled = busy || !selection; $('#object-scale').disabled = busy || !selection;
-    if (selection) {
-      $('#object-height').min = Math.min(0, selection.height);
-      $('#object-height').max = Math.max(10, Math.ceil(selection.height));
-      $('#object-height').value = selection.height;
-      $('#object-scale').value = selection.scale;
-    }
+    $('#gesture-hint').textContent = selection ? 'Drag selection to move · Pinch or drag edges to resize' : 'Drag to orbit · Tap an object to select';
     $('#undo-move').disabled = busy || !canUndo;
   }, lens => {
     $('#camera-zoom').value = lens.zoom; $('#camera-zoom-value').textContent = `${lens.zoom.toFixed(1)}×`;
@@ -229,8 +220,6 @@ function populateObjects() {
   for (const object of studio.getObjects()) $('#object-select').add(new Option(object.name, String(object.index)));
 }
 $('#object-select').onchange = event => { studio.selectObject(event.target.value === '' ? null : Number(event.target.value)); studio.focusSelected(); };
-$('#object-height').oninput = event => studio.setHeight(Number(event.target.value));
-$('#object-scale').oninput = event => studio.setScale(Number(event.target.value));
 $('#undo-move').onclick = () => studio.undoMove();
 $('#reset').onclick = () => studio?.reset(); $('#ratio').onchange = () => studio?.resize();
 function showCameraControls(show) {
