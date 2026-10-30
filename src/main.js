@@ -203,13 +203,13 @@ try {
   });
 } catch { $('#webgl-error').hidden = false; }
 function populateObjects() {
-  $('#object-select').replaceChildren(new Option('Tap a shape to move it', ''));
+  $('#object-select').replaceChildren(new Option('Tap an object to move it', ''));
   for (const object of studio.getObjects()) $('#object-select').add(new Option(object.name, String(object.index)));
 }
 function mode(move) {
   $('#move-mode').setAttribute('aria-pressed', String(move)); $('#camera-mode').setAttribute('aria-pressed', String(!move));
   $('#object-controls').hidden = !move;
-  $('#gesture-hint').textContent = move ? 'Tap a shape and drag · Use Height to lift it' : 'Drag to orbit · Pinch to zoom · Two fingers to pan';
+  $('#gesture-hint').textContent = move ? 'Tap an object and drag · Use Height to lift it' : 'Drag to orbit · Pinch to zoom · Two fingers to pan';
   studio.setMoveMode(move); studio.resize();
 }
 $('#camera-mode').onclick = () => mode(false); $('#move-mode').onclick = () => mode(true);

@@ -102,14 +102,14 @@ export async function generateScene(key, input, { signal, onProgress = () => {} 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw new Error('Scene generation stopped. Your message is still here.');
     if (deadline.aborted) throw new Error('The free provider took too long to respond. Please try again.');
-    const model = attempt ? alternate : first, maxObjects = attempt ? 12 : 24;
+    const model = attempt ? alternate : first, maxObjects = attempt ? 10 : 18;
     const schema = draftSchema(maxObjects), structured = model.supported_parameters?.includes('structured_outputs');
     onProgress(attempt ? 'Trying a smaller draft with a free model…' : 'Creating your 3D draft…');
     const progressTimer = setTimeout(() => onProgress('Still waiting for the free provider. You can stop and try again.'), 15000);
     try {
       const result = await complete(key, model, {
         messages: [{ role: 'system', content: `${draftInstructions(maxObjects)}${structured ? '' : `\nJSON schema: ${JSON.stringify(schema)}`}` }, { role: 'user', content }],
-        max_tokens: Math.min(attempt ? 3072 : 4096, model.top_provider?.max_completion_tokens || 4096),
+        max_tokens: Math.min(attempt ? 2048 : 3072, model.top_provider?.max_completion_tokens || 4096),
         ...reasoningSettings(model),
         ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'scene', strict: true, schema } } } : {}),
       }, { timeout: 35000, signal: budget });

@@ -10,7 +10,7 @@ Sign-in uses OpenRouter’s authorization-code exchange with S256 PKCE and a ran
 
 Reframe checks OpenRouter's current model catalog in the browser. It selects a concrete `:free` model only when all listed prices are zero and no conditional pricing is present. Requests disable provider fallback and specify zero maximum prompt, completion, image and request prices. The app does not use paid fallbacks or promotional discounts. Free-provider availability, account settings and usage limits still apply.
 
-Scene generation uses a compact composition schema with at most 24 primitives and locally supplied material defaults. It avoids mandatory-reasoning models when alternatives exist, requests the lowest supported reasoning effort, and checks advertised output/context capacity. Incomplete or invalid drafts can retry once with at most 12 primitives, using another eligible free model when available. The original prompt and reference remain unchanged. Authentication errors, rate limits and refusals do not automatically retry. Catalog lookup, requests and response reading share a 60-second client timeout; **Stop** cancels the scene request. Free-provider throughput and scene quality remain variable.
+Scene generation uses a compact composition schema with at most 18 primitives, grouped into complete movable objects, and locally supplied material defaults. It avoids mandatory-reasoning models when alternatives exist, requests the lowest supported reasoning effort, and checks advertised output/context capacity. Incomplete or invalid drafts can retry once with at most 10 primitives, using another eligible free model when available. The original prompt and reference remain unchanged. Authentication errors, rate limits and refusals do not automatically retry. Catalog lookup, requests and response reading share a 60-second client timeout; **Stop** cancels the scene request. Free-provider throughput and scene quality remain variable.
 
 The two stages have separate capability requirements:
 
@@ -32,7 +32,7 @@ The previous ChatGPT integration is still available as an opt-in build with `--b
 1. Select **Continue with ChatGPT**. Open the OpenAI sign-in link, enter the displayed code, and return to Reframe. OpenAI may require enabling device code sign-in in ChatGPT security settings. This is device-code authentication, not a Google-style OAuth redirect.
 2. Type a scene, add an image with **+**, or both, then use the up-arrow **Send message** button.
 3. Select **Open Studio** on the response card. The studio fills the browser viewport on phones and desktops.
-4. Orbit, zoom and pan. **Move objects** lets you tap and drag individual shapes across the ground, adjust their height, and undo movement.
+4. Orbit, zoom and pan. **Move objects** lets you tap and drag whole objects across the ground, adjust their height, and undo movement.
 5. Add an optional text note and capture up to **four frames**. Each frame snapshots the edited geometry, camera, reference, and note. Restoring a draft frame lets you edit its note; subsequent scene edits do not mutate its captured composition.
 6. Select **Let’s Go**. The captured frames and notes appear as your next chat message, followed by an assistant image reply with individual **Save** links. If a batch fails partway through, completed images remain available and retry generates only unfinished frames.
 
@@ -73,7 +73,7 @@ npm run dev
 ## Boundaries
 
 - Generated scenes approximate product references with low-poly primitives; this is not mesh reconstruction.
-- Object movement edits individual primitive shapes, not an automatically grouped product mesh. Notes are text annotations attached to a frame, not a drawing layer.
+- The AI assigns parts to named objects (for example, all sofa cushions and legs belong to Sofa). Selecting any part moves the entire object. Old snapshots without groups move as one unit; regenerate them to get separate objects. Notes are text annotations attached to a frame, not a drawing layer.
 - Image generation is guided by the captured view but may alter composition or product details. Review outputs before commercial use.
 - The optional direct OpenAI version explicitly requests high image quality and high input fidelity. The ChatGPT version asks for the highest available detail; Codex's image tool controls the actual quality and output resolution automatically.
 - In the optional direct OpenAI version, GPT Image returns square, landscape, or portrait sizes. Exported AI photo aspect ratios can differ from the selected draft ratio; the app preserves the original output without cropping it.
@@ -90,7 +90,7 @@ npm run test:openrouter
 npm run build
 ```
 
-OpenRouter tests also reproduce truncated output, bounded retries, compact-draft expansion, model capacity selection, reasoning settings, cancellation and response-body timeouts. They check PKCE/state validation, callback delivery, pending-request continuation, cancellation, popup blocking, disconnect, free-price guards, modality selection, ordered composition/reference inputs, provider failures, chat rendering, downloads, unavailable free photo generation and recovery. Unit tests also check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
+OpenRouter tests also reproduce truncated output, bounded retries, compact-draft expansion, semantic grouping, model capacity selection, reasoning settings, cancellation and response-body timeouts. They check PKCE/state validation, callback delivery, pending-request continuation, cancellation, popup blocking, disconnect, free-price guards, modality selection, ordered composition/reference inputs, provider failures, chat rendering, downloads, unavailable free photo generation and recovery. Unit tests also check scene validation, image-only inputs, frame notes, provider requests, session/job isolation, CSRF protection, request limits, sign-out, and error handling. Browser tests intercept provider/backend responses with explicit fixtures to exercise both sign-in interfaces, chat message ordering, retained studio cards, full-screen studio layout, camera movement, object dragging/height/undo, immutable frame snapshots, the four-frame limit, notes, downloads, retries across chat turns, and new-chat cancellation/reset. These fixtures are not bundled into the app. Live provider checks require an authorized account.
 
 Playwright uses `/usr/bin/chromium` by default; set `CHROMIUM_PATH` if needed. Tests start Vite automatically. Physical multitouch ergonomics still need a device trial.
 

@@ -70,9 +70,9 @@ test('truncated scene retries once with a smaller free draft, preserving the ori
     calls++;
     assert.equal(body.messages[1].content[0].text, 'A living room with a rocking chair');
     assert.equal(body.messages[1].content[1].image_url.url, image);
-    assert.equal(body.response_format.json_schema.schema.properties.objects.maxItems, calls === 1 ? 24 : 12);
+    assert.equal(body.response_format.json_schema.schema.properties.objects.maxItems, calls === 1 ? 18 : 10);
     assert.ok(!body.messages[0].content.includes('65'));
-    assert.ok(body.max_tokens <= 4096);
+    assert.ok(body.max_tokens <= 3072);
     assert.ok(!body.response_format.json_schema.schema.properties.objects.items.required.includes('roughness'));
     if (calls === 1) return Response.json({ choices: [{ finish_reason: 'length', message: { content: '{"objects":[' } }] });
     assert.equal(body.model, next.id);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { validateScene } from '../lib/scene-schema.js';
+import { sceneGroups } from '../lib/scene-groups.js';
 
 export function createStudio(container, ratio, onSelection = () => {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -28,36 +29,40 @@ export function createStudio(container, ratio, onSelection = () => {}) {
   scene.add(sun);
   const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(5, 3, 5); scene.add(fill);
   let layout = null, moveMode = false, selected = null, drag = null, undo = [], active = false;
-  let meshes = [];
+  let meshes = [], entities = [];
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
   const highlight = new THREE.BoxHelper(new THREE.Object3D(), 0x9b742e);
   highlight.visible = false; scene.add(highlight);
   function selectionChanged() {
-    if (selected !== null) highlight.setFromObject(meshes[selected]);
+    if (selected !== null) highlight.setFromObject(entities[selected].node);
     highlight.visible = moveMode && selected !== null;
-    onSelection(selected === null ? null : { index: selected, name: layout.objects[selected].name, height: meshes[selected].position.y }, undo.length > 0);
+    onSelection(selected === null ? null : { index: selected, name: entities[selected].name, height: entities[selected].node.position.y }, undo.length > 0);
   }
   function selectObject(index) {
-    selected = Number.isInteger(index) && meshes[index] ? index : null;
+    selected = Number.isInteger(index) && entities[index] ? index : null;
     selectionChanged();
   }
   function rememberMove() {
     if (selected !== null) {
-      undo.push({ index: selected, position: meshes[selected].position.toArray() });
+      undo.push({ index: selected, position: entities[selected].node.position.toArray() });
       if (undo.length > 30) undo.shift();
     }
   }
   function commitPosition() {
-    layout.objects[selected].position = meshes[selected].position.toArray();
+    const entity = entities[selected], position = entity.node.position.toArray();
+    entity.indices.forEach((index, member) => {
+      layout.objects[index].position = entity.positions[member].map((value, axis) => value + (position[axis] - entity.origin[axis]));
+    });
     selectionChanged();
   }
   function setHeight(height) {
     if (selected === null || !Number.isFinite(height)) return;
-    rememberMove(); meshes[selected].position.y = THREE.MathUtils.clamp(height, -25, 25); commitPosition();
+    const entity = entities[selected];
+    rememberMove(); entity.node.position.y = THREE.MathUtils.clamp(height, entity.min[1], entity.max[1]); commitPosition();
   }
   function undoMove() {
     const previous = undo.pop(); if (!previous) return;
-    selected = previous.index; meshes[selected].position.fromArray(previous.position); commitPosition();
+    selected = previous.index; entities[selected].node.position.fromArray(previous.position); commitPosition();
   }
   function setMoveMode(enabled) {
     moveMode = enabled; drag = null;
@@ -76,12 +81,12 @@ export function createStudio(container, ratio, onSelection = () => {}) {
     event.stopImmediatePropagation(); event.preventDefault(); cast(event);
     const hit = raycaster.intersectObjects(meshes, false)[0];
     if (!hit) { selectObject(null); return; }
-    selectObject(hit.object.userData.index);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.object.position.y);
+    selectObject(hit.object.userData.groupIndex);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.point.y);
     const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
     if (!point) return;
     rememberMove();
-    drag = { pointerId: event.pointerId, plane, offset: hit.object.position.clone().sub(point) };
+    drag = { pointerId: event.pointerId, plane, offset: entities[selected].node.position.clone().sub(point) };
     renderer.domElement.setPointerCapture(event.pointerId);
     container.style.cursor = 'grabbing';
   }, true);
@@ -91,8 +96,9 @@ export function createStudio(container, ratio, onSelection = () => {}) {
     const point = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
     if (!point) return;
     point.add(drag.offset);
-    meshes[selected].position.x = THREE.MathUtils.clamp(point.x, -25, 25);
-    meshes[selected].position.z = THREE.MathUtils.clamp(point.z, -25, 25);
+    const entity = entities[selected];
+    entity.node.position.x = THREE.MathUtils.clamp(point.x, entity.min[0], entity.max[0]);
+    entity.node.position.z = THREE.MathUtils.clamp(point.z, entity.min[2], entity.max[2]);
     commitPosition();
   }, true);
   const release = event => {
@@ -120,17 +126,23 @@ export function createStudio(container, ratio, onSelection = () => {}) {
   }
   function setScene(next) {
     validateScene(next);
-    for (const object of [...world.children]) { world.remove(object); object.geometry.dispose(); object.material.dispose(); }
+    world.traverse(object => { if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); } });
+    world.clear();
     // Edits never mutate the response card or an earlier captured frame.
     layout = structuredClone(next); selected = null; meshes = []; undo = []; drag = null;
     scene.background.set(next.background);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: next.floor, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2; floor.position.y = -0.02; floor.receiveShadow = true; world.add(floor);
-    for (const [index, object] of layout.objects.entries()) {
-      const mesh = new THREE.Mesh(geometries[object.shape](), new THREE.MeshStandardMaterial({ color: object.color, roughness: object.roughness, metalness: object.metalness, flatShading: true }));
-      mesh.position.fromArray(object.position); mesh.scale.fromArray(object.size); mesh.rotation.fromArray(object.rotation);
-      mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.index = index; meshes.push(mesh); world.add(mesh);
-    }
+    entities = sceneGroups(layout).map((entity, groupIndex) => {
+      const node = new THREE.Group(); node.position.fromArray(entity.origin); world.add(node);
+      for (const index of entity.indices) {
+        const object = layout.objects[index];
+        const mesh = new THREE.Mesh(geometries[object.shape](), new THREE.MeshStandardMaterial({ color: object.color, roughness: object.roughness, metalness: object.metalness, flatShading: true }));
+        mesh.position.fromArray(object.position).sub(node.position); mesh.scale.fromArray(object.size); mesh.rotation.fromArray(object.rotation);
+        mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.groupIndex = groupIndex; meshes.push(mesh); node.add(mesh);
+      }
+      return { ...entity, node };
+    });
     reset(); selectionChanged();
   }
   function resize() {
@@ -167,7 +179,7 @@ export function createStudio(container, ratio, onSelection = () => {}) {
     ratio.value = shot.ratio; controls.update(); resize();
   }
   return { setScene, reset, resize, capture, restore, selectObject, setHeight, setMoveMode, undoMove,
-    getObjects: () => layout?.objects.map((object, index) => ({ name: object.name, index })) || [],
+    getObjects: () => entities.map((object, index) => ({ name: object.name, index })),
     setActive: value => { active = value; if (value) resize(); },
   };
 }

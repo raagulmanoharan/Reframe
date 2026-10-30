@@ -25,7 +25,7 @@ for (const mobile of [false, true]) test(`prompt → studio → four annotated f
   const panel = await page.locator('#studio-panel').boundingBox(); expect(panel.x).toBe(0); expect(panel.y).toBe(0); expect(panel.height).toBe(mobile ? 844 : 1000);
   await page.locator('#annotate').click(); await page.locator('#frame-note').fill('Warm light from the left. Keep the antenna.'); await page.locator('#close-notes').click();
   await page.locator('#capture').click(); const first = await page.locator('.frame-image img').first().getAttribute('src'); expect(first.length).toBeGreaterThan(10000);
-  // Move a primitive vertically, capture, then restore frame 1. Its original layout must survive.
+  // Move a whole object vertically, capture, then restore frame 1. Its original layout must survive.
   await page.locator('#move-mode').click(); await page.locator('#object-select').selectOption('0');
   const initialHeight = await page.locator('#object-height').inputValue();
   await page.locator('#object-height').evaluate(el => { el.value = Number(el.value) + 1.5; el.dispatchEvent(new Event('input', { bubbles: true })); });

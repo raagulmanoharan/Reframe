@@ -34,8 +34,8 @@ export function validateInput(kind, input) {
 }
 
 const sceneInstructions = `You design rough 3D photographic compositions. Return ONLY a scene matching the supplied JSON schema.
-Use 15–65 primitive objects to make the described subject recognizable; approximate any reference image's silhouette, colors and proportions.
-Y is up, floor is y=0, positions are primitive centers. Normalize the main subject to about 3 units across.
+Use 8–18 primitives to make the described subject recognizable; approximate any reference image's silhouette, colors and proportions.
+Give every primitive a group naming the complete movable object it belongs to: all sofa parts share Sofa, all lamp parts share Lamp. Separate instances use distinct groups such as Chair 1 and Chair 2. Keep each object to a few essential blocks; omit small details. Y is up, floor is y=0, positions are primitive centers. Normalize the main subject to about 3 units across.
 All primitives have unit dimensions before size scaling, except a torus with outer diameter 1 and tube radius .07 in the XY plane.
 Cylinders and cones are vertical. Use rotations in radians. Frame the main subject with breathing room. Camera Y must be positive.
 Avoid enclosing walls and ceilings that obscure the subject. Use a tasteful palette. Never execute code or use tools.
