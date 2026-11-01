@@ -1,6 +1,6 @@
 import './style.css';
 import { createIcons, CircleHelp, ImagePlus, ArrowUpRight, ArrowUp, ArrowLeft, RotateCcw, Download, X, Camera, MessageSquare, SquarePen, UserRound, Ellipsis, Plus, Aperture, Armchair, Gem, Factory, Box } from 'lucide';
-import { createStudio } from './studio.js';
+import { createStudio, renderReviewViews } from './studio.js';
 import { generateScene, generatePhoto } from './ai.js';
 import * as openrouter from './openrouter.js';
 import { startOpenRouterLogin } from './openrouter-auth.js';
@@ -198,7 +198,10 @@ async function api(path, payload, options = {}) {
   }
   if (options.signal?.aborted) throw new Error('Scene generation stopped. Your message is still here.');
   const provider = useOpenRouter ? openrouter : { generateScene, generatePhoto };
-  try { return await (path === 'scene' ? provider.generateScene(accessCode, payload, options) : provider.generatePhoto(accessCode, payload)); }
+  try {
+    if (path === 'scene' && useOpenRouter && !payload.element) return await openrouter.generateReviewedScene(accessCode, payload, { ...options, renderPreview: renderReviewViews });
+    return await (path === 'scene' ? provider.generateScene(accessCode, payload, options) : provider.generatePhoto(accessCode, payload));
+  }
   catch (e) { if (e.status === 401) { accessCode = ''; updateOpenRouterAccount(); } throw e; }
 }
 try {
@@ -340,6 +343,22 @@ $('#brief-form').onsubmit = async event => {
     shots = []; notes = ''; activeShot = null; $('#frame-note').value = ''; $('#note-label').textContent = 'Add note';
     for (const id of ['scene-card', 'scene-preview', 'card-title', 'enter-studio']) document.getElementById(id)?.removeAttribute('id');
     const node = $('#scene-template').content.firstElementChild.cloneNode(true), card = node.querySelector('.scene-card');
+    if (data.review) {
+      const { status, assessment, reason, repairs } = data.review;
+      node.querySelector('.assistant-copy').textContent = status === 'reviewed'
+        ? `${repairs ? 'Refined and visually reviewed' : 'Visually reviewed'}. Open Studio to check the composition.`
+        : status === 'needs-work' ? 'Your draft is ready, but the visual review still found issues.' : 'Your draft is ready. Visual review was unavailable.';
+      const details = document.createElement('details'); details.className = 'scene-review';
+      const summary = document.createElement('summary'); summary.textContent = status === 'reviewed' ? 'View visual review' : 'View review limitations'; details.append(summary);
+      const copy = document.createElement('p'); copy.textContent = [assessment?.summary, reason].filter(Boolean).join(' '); details.append(copy);
+      if (assessment?.issues.length) {
+        const list = document.createElement('ul');
+        for (const issue of assessment.issues) { const item = document.createElement('li'); item.textContent = `${issue.object}: ${issue.problem} ${issue.fix}`; list.append(item); }
+        details.append(list);
+      }
+      const note = document.createElement('p'); note.textContent = 'AI review checks two views of the initial scene, before your studio edits. It does not guarantee real-world accuracy.'; details.append(note);
+      card.after(details);
+    }
     card.id = 'scene-card'; node.querySelector('.card-title').id = 'card-title'; node.querySelector('.scene-preview').id = 'scene-preview';
     const button = node.querySelector('.open-studio'); button.id = 'enter-studio';
     const view = studio.capture(); node.querySelector('.scene-preview').src = view.composition; node.querySelector('.card-title').textContent = data.scene.title;

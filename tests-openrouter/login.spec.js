@@ -22,6 +22,7 @@ test('PKCE sign-in resumes a pending scene, exchanges once, preserves draft stat
     return route.fulfill({ json: { key: 'sk-or-v1-fixture-login-key', user_id: 'fixture-user' } });
   });
   await context.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    if (route.request().postDataJSON().response_format?.json_schema.name === 'scene_review') return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ verdict: 'pass', summary: 'Fixture visual check passed.', issues: [] }) } }] } });
     requests++; expect(route.request().headers().authorization).toBe('Bearer sk-or-v1-fixture-login-key');
     expect(route.request().postDataJSON().messages[1].content[0].text).toBe('A moon observatory');
     return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify(scene) } }] } });

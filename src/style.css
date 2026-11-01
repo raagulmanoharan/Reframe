@@ -167,3 +167,9 @@ dialog { color: var(--ink); border: 1px solid #fff; border-radius: 28px; backgro
 .resize-handle[data-resize=n] { top:0; }.resize-handle[data-resize=s] { top:100%; }
 .resize-handle[data-resize=e],.resize-handle[data-resize=w] { top:50%; height:calc(100% - 32px); width:24px; cursor:ew-resize; }
 .resize-handle[data-resize=e] { left:100%; }.resize-handle[data-resize=w] { left:0; }
+
+.scene-review { margin-top: 12px; color: var(--muted, #777); font-size: 13px; line-height: 1.5; }
+.scene-review summary { cursor: pointer; }
+.scene-review p { margin: 8px 0; }
+.scene-review ul { padding-left: 20px; margin: 8px 0; }
+.scene-review li + li { margin-top: 6px; }

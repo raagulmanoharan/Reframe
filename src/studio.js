@@ -350,16 +350,16 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
     Object.assign(container.style, { position: 'absolute', width: `${width}px`, height: `${height}px`, left: `${(viewport.clientWidth - width) / 2}px`, top: `${(viewport.clientHeight - height) / 2}px` });
     renderer.setSize(width, height); camera.aspect = aspect; camera.updateProjectionMatrix(); needsRender = true;
   }
-  new ResizeObserver(resize).observe(container.parentElement);
+  const resizeObserver = new ResizeObserver(resize); resizeObserver.observe(container.parentElement);
   renderer.setAnimationLoop(() => { if (active && !document.hidden) { controls.update(); if (needsRender) renderView(); } });
-  function capture() {
+  function capture(maxDimension = 1024) {
     if (!layout) throw new Error('Create a scene first.');
     stopCameraMotion();
     const size = new THREE.Vector2(); renderer.getSize(size);
     const pixelRatio = renderer.getPixelRatio(), aspect = camera.aspect;
     try {
       const [w, h] = ratio.value.split(':').map(Number);
-      const width = w >= h ? 1024 : Math.round(1024 * w / h), height = h >= w ? 1024 : Math.round(1024 * h / w);
+      const width = w >= h ? maxDimension : Math.round(maxDimension * w / h), height = h >= w ? maxDimension : Math.round(maxDimension * h / w);
       renderer.setPixelRatio(1); renderer.setSize(width, height, false);
       camera.aspect = w / h; camera.updateProjectionMatrix(); renderView(true);
       return { scene: structuredClone(layout), composition: renderer.domElement.toDataURL('image/jpeg', 0.88), position: camera.position.toArray(), target: controls.target.toArray(), ratio: ratio.value, lens: getLens() };
@@ -379,10 +379,36 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
     setScene(next); camera.position.copy(position); controls.target.copy(target); controls.update();
     applyLens(settings);
   }
-  return { setScene, replaceScene, reset, resize, capture, restore, selectObject, setHeight, setScale, undoMove, setZoom, setFocusDistance, setBlur, focusSelected, getLens,
+  function reviewViews(next) {
+    setScene(next); resize();
+    const front = capture(640).composition;
+    const offset = camera.position.clone().sub(controls.target).applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 3);
+    camera.position.copy(controls.target).add(offset); controls.update();
+    return [front, capture(640).composition];
+  }
+  function dispose() {
+    renderer.setAnimationLoop(null); resizeObserver.disconnect(); controls.dispose();
+    world.traverse(object => { if (object.isMesh) { object.geometry.dispose(); object.material.dispose(); } });
+    sun.shadow.dispose();
+    if (composer) { for (const pass of composer.passes) pass.dispose?.(); composer.dispose(); }
+    renderer.dispose(); renderer.forceContextLoss(); selectionFrame.remove(); renderer.domElement.remove();
+  }
+  return { setScene, replaceScene, reset, resize, capture, restore, selectObject, setHeight, setScale, undoMove, setZoom, setFocusDistance, setBlur, focusSelected, getLens, reviewViews, dispose,
     snapshot: () => structuredClone(layout),
     setEnabled: value => { enabled = value; controls.enabled = value; if (!value) { stopCameraMotion(); drag = null; candidate = null; } selectionChanged(); },
     getObjects: () => entities.map((object, index) => ({ name: object.name, index })),
     setActive: value => { active = value; if (value) resize(); updateSelectionFrame(); },
   };
+}
+
+// An isolated renderer prevents review attempts from overwriting an older chat
+// card, undo history, camera or captured frame. It is always released afterwards.
+export function renderReviewViews(scene) {
+  const host = document.createElement('div'), canvas = document.createElement('div');
+  host.setAttribute('aria-hidden', 'true'); host.inert = true;
+  Object.assign(host.style, { position: 'fixed', left: '-10000px', width: '640px', height: '480px', pointerEvents: 'none' });
+  host.append(canvas); document.body.append(host);
+  let preview;
+  try { preview = createStudio(canvas, { value: '4:3' }); return preview.reviewViews(scene); }
+  finally { preview?.dispose(); host.remove(); }
 }

@@ -12,6 +12,7 @@ test('OpenRouter chat uses only free models, submits the studio composition and 
   let image, request;
   await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ json: { data: [model, photo] } }));
   await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    if (route.request().postDataJSON().response_format?.json_schema.name === 'scene_review') return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ verdict: 'pass', summary: 'Fixture visual check passed.', issues: [] }) } }] } });
     request = route.request().postDataJSON();
     return route.fulfill({ json: { choices: [{ message: request.modalities ? { images: [{ image_url: { url: image } }] } : { content: JSON.stringify(scene) } }] } });
   });
@@ -44,6 +45,7 @@ test('the reported rocking-chair truncation recovers automatically without askin
   let calls = 0;
   await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ json: { data: [model] } }));
   await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    if (route.request().postDataJSON().response_format?.json_schema.name === 'scene_review') return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ verdict: 'pass', summary: 'Fixture visual check passed.', issues: [] }) } }] } });
     calls++; const body = route.request().postDataJSON();
     expect(body.messages[1].content[0].text).toBe('A living room with a rocking chair');
     return route.fulfill({ json: { choices: [{ finish_reason: calls === 1 ? 'length' : 'stop', message: { content: calls === 1 ? '{"objects":[' : JSON.stringify(scene) } }] } });
@@ -56,6 +58,7 @@ test('a failed scene appears once and Stop cancels a slow provider without gener
   let calls = 0, slow = false;
   await page.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ json: { data: [model] } }));
   await page.route('https://openrouter.ai/api/v1/chat/completions', route => {
+    if (route.request().postDataJSON().response_format?.json_schema.name === 'scene_review') return route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ verdict: 'pass', summary: 'Fixture visual check passed.', issues: [] }) } }] } });
     calls++; if (slow) return;
     return route.fulfill({ json: { choices: [{ finish_reason: 'length', message: { content: '{"objects":[' } }] } });
   });
