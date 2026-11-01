@@ -1,6 +1,7 @@
 import { sceneInstructions } from '../lib/scene-instructions.js';
 import { sceneSchema, validateScene } from '../lib/scene-schema.js';
 import { sceneBrief, notesInstruction } from '../lib/generation-input.js';
+import { designInstructions } from '../lib/scene-design.js';
 import { lensInstructions } from '../lib/camera-settings.js';
 
 function description(value) {
@@ -48,7 +49,7 @@ export async function generateScene(key, input) {
   const result = await openai('chat/completions', key, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4.1-mini', max_completion_tokens: 10000,
+      model: 'gpt-4.1-mini', max_completion_tokens: 14000,
       messages: [{ role: 'system', content: sceneInstructions }, { role: 'user', content }],
       response_format: { type: 'json_schema', json_schema: { name: 'scene', strict: true, schema: sceneSchema } },
     }),
@@ -63,7 +64,7 @@ export async function generatePhoto(key, input) {
   if (!['4:3', '1:1', '9:16', '16:9'].includes(input.ratio)) throw new Error('Invalid aspect ratio.');
   const form = new FormData();
   form.set('model', 'gpt-image-1');
-  form.set('prompt', `Turn the first image, a low-poly composition draft, into a high-quality photorealistic photograph. Scene brief: ${prompt}\nPreserve the first image's camera viewpoint, framing, perspective, main subject position, scale and spatial relationships as closely as possible. Replace block geometry with realistic forms, materials, lighting and detail. Do not introduce text or watermarks. The intended aspect ratio is ${input.ratio}. ${reference ? 'The SECOND image is the actual product reference: preserve its design, proportions, colors, materials and distinctive details while placing it at the location and orientation in the first image. It is not a reference for composition.' : ''}${notes}${camera}`);
+  form.set('prompt', `Turn the first image, a low-poly composition draft, into a high-quality photorealistic photograph. Scene brief: ${prompt}\nPreserve the first image's camera viewpoint, framing, perspective, main subject position, scale and spatial relationships as closely as possible. Replace block geometry with realistic forms, materials, lighting and detail. Do not introduce text or watermarks. The intended aspect ratio is ${input.ratio}. ${reference ? 'The SECOND image is the actual product reference: preserve its design, proportions, colors, materials and distinctive details while placing it at the location and orientation in the first image. It is not a reference for composition.' : ''}${designInstructions(input.design)}${notes}${camera}`);
   form.append('image[]', composition.blob, `composition.${composition.extension}`);
   if (reference) form.append('image[]', reference.blob, `reference.${reference.extension}`);
   form.set('quality', 'high'); form.set('input_fidelity', 'high'); form.set('n', '1');

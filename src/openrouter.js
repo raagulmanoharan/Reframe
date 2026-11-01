@@ -1,6 +1,7 @@
 import { draftSchema, expandDraft, draftInstructions } from '../lib/scene-draft.js';
 import { sceneBrief, notesInstruction } from '../lib/generation-input.js';
 import { lensInstructions } from '../lib/camera-settings.js';
+import { designInstructions } from '../lib/scene-design.js';
 
 const baseURL = 'https://openrouter.ai/api/v1';
 const zero = value => (typeof value === 'string' && value.trim() !== '' || typeof value === 'number') && Number(value) === 0;
@@ -18,9 +19,10 @@ export function chooseModel(models, { photo = false, reference = false } = {}) {
     model.architecture?.input_modalities?.includes('text') &&
     model.architecture?.output_modalities?.includes(photo ? 'image' : 'text') &&
     (!(reference || photo) || model.architecture?.input_modalities?.includes('image')) &&
-    (photo || (!model.top_provider?.max_completion_tokens || model.top_provider.max_completion_tokens >= 2048) && (!model.context_length || model.context_length >= 8192)));
-  const score = model => (model.supported_parameters?.includes('structured_outputs') ? 4 : 0) -
-    (photo ? 0 : model.reasoning?.mandatory ? 100 : model.supported_parameters?.includes('reasoning') && !model.reasoning ? 10 : 0);
+    (photo || (!model.top_provider?.max_completion_tokens || model.top_provider.max_completion_tokens >= 4096) && (!model.context_length || model.context_length >= 16384)));
+  const score = model => (model.supported_parameters?.includes('structured_outputs') ? 4 : 0) +
+    (photo ? 0 : (model.reasoning || model.supported_parameters?.includes('reasoning') ? 8 : 0) +
+      ((model.top_provider?.max_completion_tokens || 0) >= 12288 ? 2 : 0));
   // Vision is required only for reference uploads, not preferred for text-only drafts.
 
   eligible.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id));
@@ -86,14 +88,14 @@ async function complete(key, model, body, { timeout = 240000, signal } = {}) {
 function reasoningSettings(model) {
   if (!model.reasoning && !model.supported_parameters?.includes('reasoning')) return {};
   const allowed = model.reasoning?.supported_efforts;
-  const order = model.reasoning?.mandatory ? ['minimal', 'low', 'medium'] : ['none', 'minimal', 'low'];
+  const order = ['medium', 'low', 'minimal'];
   const effort = order.find(value => !Array.isArray(allowed) || allowed.includes(value));
-  return effort ? { reasoning: { effort } } : {};
+  return effort ? { reasoning: { effort, exclude: true } } : {};
 }
 export async function generateScene(key, input, { signal, onProgress = () => {} } = {}) {
   const reference = inputImage(input.reference), prompt = sceneBrief(input.prompt, reference);
   // Includes catalog lookup, both attempts and response-body reading.
-  const deadline = AbortSignal.timeout(60000);
+  const deadline = AbortSignal.timeout(120000);
   const budget = signal ? AbortSignal.any([signal, deadline]) : deadline;
   const models = await getFreeModels({ signal: budget, timeout: 10000 });
   const first = chooseModel(models, { reference: Boolean(reference) });
@@ -103,17 +105,29 @@ export async function generateScene(key, input, { signal, onProgress = () => {} 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (signal?.aborted) throw new Error('Scene generation stopped. Your message is still here.');
     if (deadline.aborted) throw new Error('The free provider took too long to respond. Please try again.');
-    const model = attempt ? alternate : first, maxObjects = attempt ? 10 : 18;
+    const model = attempt ? alternate : first;
+    const reasoning = reasoningSettings(model);
+    // Leave context for the instructions/schema, the original brief and vision
+    // input too. This conservative text estimate avoids filling a small context
+    // with the requested completion alone; actual tokenization is provider-specific.
+    const inputReserve = Math.ceil((draftInstructions(64).length + JSON.stringify(draftSchema()).length + prompt.length) / 2) + (reference ? 4096 : 0) + 1024;
+    const maxTokens = Math.min(attempt ? 8192 : 12288, model.top_provider?.max_completion_tokens || 12288,
+      model.context_length ? Math.max(2048, model.context_length - inputReserve) : 12288);
+    // Reasoning and JSON share the completion allowance. Reserve space for both
+    // instead of asking a small-output provider to produce a truncated scene.
+    const geometryBudget = maxTokens - (reasoning.reasoning || model.reasoning?.mandatory ? Math.ceil(maxTokens / 3) : 0) - 1000;
+    const maxObjects = Math.max(6, Math.min(input.element ? 32 : attempt ? 32 : 64, Math.floor(geometryBudget / 160)));
+    const maxParts = input.element ? 32 : 96;
     const schema = draftSchema(maxObjects), structured = model.supported_parameters?.includes('structured_outputs');
-    onProgress(attempt ? 'Trying a smaller draft with a free model…' : 'Creating your 3D draft…');
-    const progressTimer = setTimeout(() => onProgress('Still waiting for the free provider. You can stop and try again.'), 15000);
+    onProgress(attempt ? 'Rebuilding a more compact scene with a free model…' : 'Developing your scene and its details…');
+    const progressTimer = setTimeout(() => onProgress('Still building your scene. More detail can take a little longer; you can stop at any time.'), 20000);
     try {
       const result = await complete(key, model, {
-        messages: [{ role: 'system', content: `${draftInstructions(maxObjects)}${structured ? '' : `\nJSON schema: ${JSON.stringify(schema)}`}` }, { role: 'user', content }],
-        max_tokens: Math.min(attempt ? 2048 : 3072, model.top_provider?.max_completion_tokens || 4096),
-        ...reasoningSettings(model),
+        messages: [{ role: 'system', content: `${draftInstructions(maxObjects, maxParts, Boolean(input.element))}${structured ? '' : `\nJSON schema: ${JSON.stringify(schema)}`}` }, { role: 'user', content }],
+        max_tokens: maxTokens,
+        ...reasoning,
         ...(structured ? { response_format: { type: 'json_schema', json_schema: { name: 'scene', strict: true, schema } } } : {}),
-      }, { timeout: 35000, signal: budget });
+      }, { timeout: 75000, signal: budget });
       if (signal?.aborted) throw new Error('Scene generation stopped. Your message is still here.');
       const answer = result.choices?.[0];
       if (answer?.message?.refusal || answer?.finish_reason === 'content_filter') throw new Error('The free model declined this scene request.');
@@ -121,7 +135,7 @@ export async function generateScene(key, input, { signal, onProgress = () => {} 
         const text = answer.message.content.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1');
         // Some providers flag length after a complete JSON object; keep it only
         // when the whole object parses and all geometry passes validation.
-        return { scene: expandDraft(JSON.parse(text), maxObjects), model: model.id };
+        return { scene: expandDraft(JSON.parse(text), maxObjects, maxParts), model: model.id };
       } catch {
         const error = new Error('The free model did not finish a usable 3D scene. Your prompt is fine—please try again.');
         error.code = 'INVALID_DRAFT'; throw error;
@@ -134,10 +148,10 @@ export async function generateScene(key, input, { signal, onProgress = () => {} 
 }
 export async function generatePhoto(key, input) {
   const composition = inputImage(input.composition, true), reference = inputImage(input.reference);
-  const prompt = sceneBrief(input.prompt, reference), notes = notesInstruction(input.notes), camera = lensInstructions(input.lens);
+  const prompt = sceneBrief(input.prompt, reference), notes = notesInstruction(input.notes), camera = lensInstructions(input.lens), design = designInstructions(input.design);
   if (!['1:1', '4:3', '9:16', '16:9'].includes(input.ratio)) throw new Error('Invalid aspect ratio.');
   const model = chooseModel(await getFreeModels(), { photo: true });
-  const text = `Turn the FIRST image, a low-poly composition, into a photorealistic photograph. Preserve its camera viewpoint, framing, perspective, object positions, scale and spatial relationships. Refine the block shapes into realistic forms. Scene: ${prompt}. Aspect ratio: ${input.ratio}. ${reference ? 'The SECOND image is the product reference: preserve its design, colors, proportions and distinctive details. It defines appearance, not composition.' : ''}${notes}${camera}\nReturn one generated image, not a description or image URL.`;
+  const text = `Turn the FIRST image, a 3D composition, into a photorealistic photograph. Preserve its camera viewpoint, framing, perspective, object positions, scale and spatial relationships. Refine the geometry into realistic forms without redesigning the objects. Scene: ${prompt}. Aspect ratio: ${input.ratio}. ${reference ? 'The SECOND image is the product reference: preserve its design, colors, proportions and distinctive details. It defines appearance, not composition.' : ''}${design}${notes}${camera}\nReturn one generated image, not a description or image URL.`;
   const result = await complete(key, model, {
     modalities: model.architecture.output_modalities.includes('text') ? ['image', 'text'] : ['image'],
     messages: [{ role: 'user', content: [composition, ...(reference ? [reference] : []), { type: 'text', text }] }],

@@ -273,7 +273,7 @@ $('#regenerate').onclick = async () => {
   additionController = new AbortController(); studioError(); setBusy(true, 'Adding your element…');
   $('#addition-status').textContent = 'Creating your new element…';
   try {
-    const data = await api('scene', { prompt: additionBrief(before, addition) }, {
+    const data = await api('scene', { prompt: additionBrief(before, addition), element: true }, {
       signal: additionController.signal,
       onProgress: text => { $('#addition-status').textContent = text; },
     });
@@ -448,7 +448,7 @@ async function renderFrames(existingBatch = null) {
     for (const [index, shot] of pending.entries()) {
       shot.generating = true; shot.failed = false; updateResults(batch);
       status.textContent = `Creating image ${index + 1} of ${pending.length} from your composition.`;
-      const result = await api('render', { prompt: shot.prompt, reference: shot.reference, composition: shot.composition, ratio: shot.ratio, notes: shot.notes, lens: shot.lens });
+      const result = await api('render', { prompt: shot.prompt, reference: shot.reference, composition: shot.composition, ratio: shot.ratio, notes: shot.notes, lens: shot.lens, design: shot.scene.design });
       if (typeof result.image !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(result.image)) throw new Error('The AI service returned an invalid image.');
       shot.photo = result.image; shot.source.photo = result.image; shot.generating = false; updateResults(batch);
     }

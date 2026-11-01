@@ -63,7 +63,7 @@ test('a failed scene appears once and Stop cancels a slow provider without gener
   await expect(page.locator('.message-failed')).toContainText('Your prompt is fine');
   await expect(page.locator('#error')).toBeHidden(); await expect(page.locator('#enter-studio')).toHaveCount(0); expect(calls).toBe(2);
   slow = true; await page.getByRole('button', { name: 'Use this message again' }).click(); await page.locator('#build').click();
-  await expect(page.locator('.thinking-label')).toHaveText('Creating your 3D draft…');
+  await expect(page.locator('.thinking-label')).toHaveText('Developing your scene and its details…');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(page.locator('.message-failed').last()).toContainText('generation stopped');
   await expect(page.locator('#build')).toBeEnabled(); await expect(page.locator('#error')).toBeHidden();

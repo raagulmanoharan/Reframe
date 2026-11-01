@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { validateScene } from '../lib/scene-schema.js';
 import { sceneGroups } from '../lib/scene-groups.js';
 import { validateLens } from '../lib/camera-settings.js';
@@ -303,10 +304,12 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
   surface.addEventListener('lostpointercapture', event => { if (ownedPointers.has(event.pointerId)) release(event); }, true);
   const geometries = {
     box: () => new THREE.BoxGeometry(1, 1, 1),
-    sphere: () => new THREE.SphereGeometry(0.5, 16, 10),
-    cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 16),
-    cone: () => new THREE.ConeGeometry(0.5, 1, 12),
-    torus: () => new THREE.TorusGeometry(0.43, 0.07, 10, 32),
+    roundedBox: () => new RoundedBoxGeometry(1, 1, 1, 2, 0.12),
+    capsule: () => new THREE.CapsuleGeometry(0.25, 0.5, 6, 16).scale(2, 1, 2),
+    sphere: () => new THREE.SphereGeometry(0.5, 24, 16),
+    cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 24),
+    cone: () => new THREE.ConeGeometry(0.5, 1, 24),
+    torus: () => new THREE.TorusGeometry(0.43, 0.07, 12, 48),
     icosahedron: () => new THREE.IcosahedronGeometry(0.5, 0),
   };
   function reset() {
@@ -331,7 +334,7 @@ export function createStudio(container, ratio, onSelection = () => {}, onCameraC
       const node = new THREE.Group(); node.position.fromArray(entity.origin); world.add(node);
       for (const index of entity.indices) {
         const object = layout.objects[index];
-        const mesh = new THREE.Mesh(geometries[object.shape](), new THREE.MeshStandardMaterial({ color: object.color, roughness: object.roughness, metalness: object.metalness, flatShading: true }));
+        const mesh = new THREE.Mesh(geometries[object.shape](), new THREE.MeshStandardMaterial({ color: object.color, roughness: object.roughness, metalness: object.metalness, flatShading: object.shape === 'icosahedron' }));
         mesh.position.fromArray(object.position).sub(node.position); mesh.scale.fromArray(object.size); mesh.rotation.fromArray(object.rotation);
         mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.groupIndex = groupIndex; meshes.push(mesh); node.add(mesh);
       }

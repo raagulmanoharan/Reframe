@@ -71,10 +71,11 @@ test('truncated scene retries once with a smaller free draft, preserving the ori
     calls++;
     assert.equal(body.messages[1].content[0].text, 'A living room with a rocking chair');
     assert.equal(body.messages[1].content[1].image_url.url, image);
-    assert.equal(body.response_format.json_schema.schema.properties.objects.maxItems, calls === 1 ? 18 : 10);
+    assert.equal(body.response_format.json_schema.schema.properties.objects.maxItems, calls === 1 ? 64 : 32);
     assert.ok(!body.messages[0].content.includes('65'));
-    assert.ok(body.max_tokens <= 3072);
-    assert.ok(!body.response_format.json_schema.schema.properties.objects.items.required.includes('roughness'));
+    assert.equal(body.max_tokens, calls === 1 ? 12288 : 8192);
+    assert.ok(body.response_format.json_schema.schema.properties.objects.items.required.includes('roughness'));
+    assert.ok(body.response_format.json_schema.schema.required.includes('design'));
     if (calls === 1) return Response.json({ choices: [{ finish_reason: 'length', message: { content: '{"objects":[' } }] });
     assert.equal(body.model, next.id);
     return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(compact) } }] });
@@ -83,19 +84,19 @@ test('truncated scene retries once with a smaller free draft, preserving the ori
     assert.equal(result.scene.objects[0].roughness, 0.75); assert.equal(result.scene.objects[0].metalness, 0);
     assert.equal(result.scene.objects[0].shape, scene.objects[0].shape);
   });
-  assert.equal(calls, 2); assert.ok(progress.some(text => text.includes('smaller draft')));
+  assert.equal(calls, 2); assert.ok(progress.some(text => text.includes('compact scene')));
 });
-test('model selection avoids mandatory reasoning and insufficient output capacity; optional reasoning is disabled', async () => {
+test('model selection prefers free reasoning with sufficient output capacity and requests bounded effort', async () => {
   const reasoning = { ...free, id: 'fixture/a-reasoner:free', reasoning: { mandatory: true, supported_efforts: ['high', 'low'] } };
   const small = { ...free, id: 'fixture/a-small:free', top_provider: { max_completion_tokens: 512 } };
-  assert.equal(chooseModel([reasoning, small, free]).id, free.id);
+  assert.equal(chooseModel([reasoning, small, free]).id, reasoning.id);
   const optional = { ...free, supported_parameters: ['structured_outputs', 'reasoning'], reasoning: { mandatory: false, supported_efforts: ['high', 'low', 'none'] } };
   await provider([optional], body => {
-    assert.deepEqual(body.reasoning, { effort: 'none' });
+    assert.deepEqual(body.reasoning, { effort: 'low', exclude: true });
     return Response.json({ choices: [{ message: { content: JSON.stringify(scene) } }] });
   }, () => generateScene('fixture-key', { prompt: 'A rocking chair' }));
   await provider([reasoning], body => {
-    assert.deepEqual(body.reasoning, { effort: 'low' });
+    assert.deepEqual(body.reasoning, { effort: 'low', exclude: true });
     return Response.json({ choices: [{ message: { content: JSON.stringify(scene) } }] });
   }, () => generateScene('fixture-key', { prompt: 'A rocking chair' }));
 });
@@ -131,11 +132,35 @@ test('stop cancels response reading without a retry, and the shared deadline als
     setTimeout(() => controller.abort(), 15);
     await assert.rejects(operation, /generation stopped/); assert.equal(calls, 1);
     calls = 0;
-    AbortSignal.timeout = ms => originalTimeout(ms === 60000 ? 20 : ms);
+    AbortSignal.timeout = ms => originalTimeout(ms === 120000 ? 20 : ms);
     // Keep the event loop alive while Node's unreferenced AbortSignal timer fires.
     const keepAlive = setTimeout(() => {}, 200);
     try { await assert.rejects(generateScene('fixture-key', { prompt: 'A room' }), /took too long/); }
     finally { clearTimeout(keepAlive); }
     assert.equal(calls, 1);
   } finally { globalThis.fetch = originalFetch; AbortSignal.timeout = originalTimeout; }
+});
+
+test('reasoned scene budgets adapt to provider limits; additions stay within their reserved parts', async () => {
+  const limited = { ...free, context_length: 16384, top_provider: { max_completion_tokens: 4096 }, supported_parameters: ['structured_outputs', 'reasoning'] };
+  await provider([limited], body => {
+    assert.equal(body.max_tokens, 4096); assert.deepEqual(body.reasoning, { effort: 'medium', exclude: true });
+    assert.ok(body.response_format.json_schema.schema.properties.objects.maxItems <= 12);
+    return Response.json({ choices: [{ message: { content: JSON.stringify(scene) } }] });
+  }, () => generateScene('fixture-key', { prompt: 'A living room', reference: image }));
+  await provider([free], body => {
+    assert.equal(body.response_format.json_schema.schema.properties.objects.maxItems, 32);
+    assert.match(body.messages[0].content, /ONLY the requested new object/);
+    assert.match(body.messages[0].content, /32 total parts/);
+    return Response.json({ choices: [{ message: { content: JSON.stringify(scene) } }] });
+  }, () => generateScene('fixture-key', { prompt: 'A chair', element: true }));
+});
+
+test('photo guidance carries the captured design while edited composition takes precedence', async () => {
+  await provider([photo], body => {
+    const instruction = body.messages[0].content.at(-1).text;
+    assert.ok(instruction.includes(scene.design));
+    assert.match(instruction, /take priority/); assert.match(instruction, /do not restore/);
+    return Response.json({ choices: [{ message: { images: [{ image_url: { url: image } }] } }] });
+  }, () => generatePhoto('fixture-key', { prompt: 'observatory', design: scene.design, composition: image, ratio: '4:3' }));
 });

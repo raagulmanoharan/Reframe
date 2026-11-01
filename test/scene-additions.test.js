@@ -30,7 +30,7 @@ test('adding a similarly named element cannot replace an existing object; invali
   assert.throws(() => mergeAddition(scene, { ...lamp, objects: [] }, addition), /count/);
   assert.deepEqual(scene, before);
   assert.throws(() => addNode(original, '', [0, 0, 0]), /Describe/);
-  assert.throws(() => addNode({ ...original, objects: Array(79).fill(original.objects[0]) }, 'Lamp', [0, 0, 0]), /full/);
+  assert.throws(() => addNode({ ...original, objects: Array(65).fill(original.objects[0]) }, 'Lamp', [0, 0, 0]), /full/);
 });
 test('a small node can fit an object with thin parts without invalidating the scene', () => {
   const { scene, addition } = addNode(original, 'Small lamp', [0, 0, 0]);
